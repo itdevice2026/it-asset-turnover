@@ -19,6 +19,8 @@
   .bo-signs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .bo-signs .sign{background:var(--paper)}
   .bo-total{font-family:var(--mono);font-weight:600}
+  .bo-gen{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  @media print{.bo-gen{display:none!important}}
   @media(max-width:700px){.bo-grid{grid-template-columns:1fr 1fr}.bo-signs{grid-template-columns:1fr}}
   @media print{
     .bo-body{background:#fff;border-color:#000}
@@ -53,6 +55,7 @@
         <div class="f"><label>Approved by (Management / Finance)</label><input name="bo_approved_by"></div>
         <div class="f wide"><label>Remarks (condition sold, inclusions, accessories, warranty status)</label><input name="bo_remarks"></div>
       </div>
+      <div class="bo-gen noprint"><button type="button" class="btn" id="btnBuyoutForm">Generate Buyout Form</button><span class="hint" style="margin:0">Opens the printable IT Asset Buyout Form (Deed of Sale &amp; Proof of Purchase) filled from this record.</span></div>
       <div class="bo-terms"><b>Terms of sale.</b> The item(s) ticked above are sold to the employee on an <b>"as-is, where-is"</b> basis, with no warranty from the company. Company data, licenses and accounts have been removed or transferred before release. Upon full payment, ownership passes to the employee and the item(s) are removed from the company's fixed-asset register. This section, together with the official receipt referenced above, serves as the employee's <b>proof of purchase</b>.</div>
       <div class="bo-signs">
         <div class="sign">
@@ -111,4 +114,116 @@
     attType.insertBefore(o, attType.options[attType.options.length - 1]);
   }
   sync();
+
+  /* ===================== Generated document: IT Asset Buyout Form ===================== */
+  const E = (typeof esc === 'function') ? esc : (s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])));
+  function amountWords(v){
+    const n = Math.round(parseFloat(String(v).replace(/[^0-9.]/g, '')) * 100); if (!isFinite(n) || n < 0) return '';
+    const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    const chunk = x => (x >= 100 ? ones[Math.floor(x/100)] + ' Hundred' + (x%100 ? ' ' : '') : '') + (x%100 < 20 ? ones[x%100] : tens[Math.floor((x%100)/10)] + (x%10 ? '-' + ones[x%10] : ''));
+    const words = x => { if (x === 0) return 'Zero'; const parts = []; const sc = [[1e9,'Billion'],[1e6,'Million'],[1e3,'Thousand'],[1,'']]; for (const [d, name] of sc) { const q = Math.floor(x/d); if (q) { parts.push(chunk(q) + (name ? ' ' + name : '')); x %= d; } } return parts.join(' '); };
+    const pesos = Math.floor(n/100), cents = n%100;
+    return words(pesos) + ' Peso' + (pesos === 1 ? '' : 's') + (cents ? ' and ' + String(cents).padStart(2,'0') + '/100' : ' Only');
+  }
+  const B = (v, n) => v ? E(v) : '&nbsp;'.repeat(n);
+  const fmtDate = d => { if (!d) return ''; const x = new Date(d + (String(d).length === 10 ? 'T00:00:00' : '')); return isNaN(x) ? d : x.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' }); };
+  const fmtAmt = v => { const n = parseFloat(String(v).replace(/[^0-9.]/g, '')); return isFinite(n) ? n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (v || ''); };
+  function reasonText(o){ const m = { r_resign:'Resignation', r_term:'End of contract / Termination', r_transfer:'Transfer', r_reassign:'Reassignment', r_replace:'Replacement / Upgrade' }; const r = Object.keys(m).filter(k => o[k]).map(k => m[k]); if (o.r_other) r.push(o.r_other_txt || 'Other'); return r.join(', '); }
+
+  function buildBuyoutDoc(){
+    const o = collect();
+    const co = companyName(o), abbr = (document.querySelector('#company option:checked')||{}).dataset?.abbr || '';
+    const logo = (typeof LOGOS !== 'undefined' && LOGOS[o.company]) || '';
+    const ref = (o.ctrl_no || '').trim() ? o.ctrl_no.trim() + '-BO' : (abbr ? abbr + '-BO-' + new Date().toISOString().slice(0,10).replace(/-/g,'') : '');
+    const items = ASSET_TYPES.map((t, i) => o['bo_item' + i] ? { n: i + 1, type: t, tag: o['a'+i+'_tag'], sn: o['a'+i+'_sn'], desc: o['a'+i+'_desc'], cond: o['a'+i+'_good'] ? 'Good' : o['a'+i+'_dmg'] ? 'Damaged' : '', rem: o['a'+i+'_rem'] } : null).filter(Boolean);
+    const rows = (items.length ? items : [{}]).map((it, k) => `<tr><td class="c">${it.n ? k + 1 : ''}</td><td>${E(it.type||'')}</td><td class="m">${E(it.tag||'')}</td><td class="m">${E(it.sn||'')}</td><td>${E(it.desc||'')}</td><td class="c">${E(it.cond||'')}</td><td>${E(it.rem||'')}</td></tr>`).join('')
+      + Array.from({ length: Math.max(0, 4 - items.length) }, () => '<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
+    const amt = fmtAmt(o.bo_amount), words = amountWords(o.bo_amount);
+    const today = fmtDate(new Date().toISOString().slice(0,10));
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>IT Asset Buyout Form ${E(ref)}</title>
+<style>
+@page{size:A4;margin:14mm 14mm 16mm}
+*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111;margin:0;padding:24px;background:#eee}
+.sheet{background:#fff;max-width:800px;margin:0 auto;padding:28px 32px;box-shadow:0 2px 12px rgba(0,0,0,.15)}
+.hdr{display:flex;align-items:center;gap:16px;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+.hdr img{height:54px;max-width:170px;object-fit:contain}.hdr .co{font-size:15px;font-weight:700;letter-spacing:.02em}.hdr .sub{font-size:10.5px;color:#444}
+.hdr .ref{margin-left:auto;text-align:right;font-size:10.5px;line-height:1.5}.hdr .ref b{font-family:Consolas,monospace;font-size:12px}
+h1{font-size:16px;text-align:center;letter-spacing:.06em;margin:4px 0 2px}.tagline{text-align:center;font-size:10.5px;color:#444;margin-bottom:12px}
+h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:#f0f0f0;border-left:4px solid #111;padding:4px 8px;margin:14px 0 6px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px 14px}.grid .f{border-bottom:1px solid #999;padding:2px 0 3px;min-height:26px}.grid .f.w2{grid-column:span 2}
+.lbl{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#555}.val{font-size:11.5px;min-height:14px}
+table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border:1px solid #333;padding:4px 5px;vertical-align:top;font-size:10.5px}th{background:#f0f0f0;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em}td.c{text-align:center}td.m{font-family:Consolas,monospace}
+.pay{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}.amt{grid-column:span 2;display:flex;gap:12px;align-items:baseline;border:1px solid #333;padding:8px 10px;margin-bottom:4px}.amt .num{font-size:16px;font-weight:700;font-family:Consolas,monospace}.amt .wds{font-style:italic}
+ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-bottom:3px}
+.signs{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px;margin-top:10px}.sg{padding-top:34px}.sg .line{border-top:1px solid #111;padding-top:3px;font-weight:700;font-size:11px}.sg .role{font-size:9.5px;color:#444}.sg .dt{font-size:9.5px;color:#444;margin-top:8px}.sg .dt span{display:inline-block;min-width:110px;border-bottom:1px solid #111;margin-left:4px;text-align:center;font-weight:600;color:#111}
+.stub{margin-top:18px;border:1px dashed #333;padding:10px 12px}.stub .t{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}.stub p{margin:0 0 6px;line-height:1.7}.stub u{text-decoration:none;border-bottom:1px solid #111;padding:0 8px;font-weight:600}
+.foot{margin-top:14px;font-size:9px;color:#666;display:flex;justify-content:space-between;border-top:1px solid #ccc;padding-top:4px}
+.bar{max-width:800px;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}.bar button{border:1px solid #333;background:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:12px}.bar button.p{background:#111;color:#fff}
+@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;padding:0;max-width:none}.bar{display:none}.stub{break-inside:avoid}.signs{break-inside:avoid}}
+</style></head><body>
+<div class="bar"><button onclick="window.close()">Close</button><button class="p" onclick="window.print()">Print / Save as PDF</button></div>
+<div class="sheet">
+  <div class="hdr">${logo ? `<img src="${logo}" alt="">` : ''}<div><div class="co">${E(co)}</div><div class="sub">Information Technology Department</div></div>
+    <div class="ref">Buyout Ref. No.: <b>${E(ref)}</b><br>Turnover Control No.: <b>${E(o.ctrl_no||'')}</b><br>Date generated: ${E(today)}</div></div>
+  <h1>IT ASSET BUYOUT FORM</h1>
+  <div class="tagline">Deed of Sale of Company IT Asset to Employee &middot; Proof of Purchase</div>
+
+  <h2>1. Buyer (Employee) Information</h2>
+  <div class="grid">
+    <div class="f w2"><span class="lbl">Employee name</span><div class="val">${E(o.emp_name||'')}</div></div>
+    <div class="f"><span class="lbl">Employee ID</span><div class="val">${E(o.emp_id||'')}</div></div>
+    <div class="f"><span class="lbl">Date of turnover</span><div class="val">${E(fmtDate(o.emp_date))}</div></div>
+    <div class="f"><span class="lbl">Department</span><div class="val">${E(o.emp_dept||'')}</div></div>
+    <div class="f"><span class="lbl">Position</span><div class="val">${E(o.emp_pos||'')}</div></div>
+    <div class="f"><span class="lbl">Immediate supervisor</span><div class="val">${E(o.emp_sup||'')}</div></div>
+    <div class="f"><span class="lbl">Reason for turnover</span><div class="val">${E(reasonText(o))}</div></div>
+  </div>
+
+  <h2>2. IT Asset(s) Sold</h2>
+  <table><thead><tr><th style="width:26px">#</th><th style="width:120px">Item</th><th style="width:95px">Asset Tag</th><th style="width:110px">Serial No.</th><th>Description / Model</th><th style="width:64px">Condition</th><th style="width:120px">Remarks</th></tr></thead><tbody>${rows}</tbody></table>
+
+  <h2>3. Sale &amp; Payment Details</h2>
+  <div class="pay">
+    <div class="amt"><span class="lbl" style="display:inline">Total buyout price</span><span class="num">PHP ${E(amt)}</span><span class="wds">${E(words)}</span></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Basis of valuation</span><div class="val">${E(o.bo_basis||'')}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Payment method</span><div class="val">${E(o.bo_method||'')}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">OR / AR No.</span><div class="val" style="font-family:Consolas,monospace">${E(o.bo_or_no||'')}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Date paid</span><div class="val">${E(fmtDate(o.bo_date))}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0;grid-column:span 2"><span class="lbl">Remarks / inclusions</span><div class="val">${E(o.bo_remarks||'')}</div></div>
+  </div>
+
+  <h2>4. Terms and Conditions of Sale</h2>
+  <ol>
+    <li><b>${E(co)}</b> (the "Company") sells, transfers and conveys to the employee named above (the "Buyer") the IT asset(s) listed in Section 2 for the total price stated in Section 3.</li>
+    <li>The asset(s) are sold on an <b>"as-is, where-is"</b> basis. The Company gives no warranty as to condition, fitness for purpose, remaining useful life, or manufacturer warranty coverage.</li>
+    <li>All company data, files, e-mail/account profiles, and licensed software (including operating system volume licenses and Microsoft 365) have been removed, transferred or deactivated before release. Software licenses are <b>not</b> transferred with the asset unless expressly stated in the remarks.</li>
+    <li>Ownership and risk pass to the Buyer upon full payment and release of the asset(s). The asset(s) are thereafter removed from the Company's fixed-asset register and IT asset inventory.</li>
+    <li>Where payment is by salary deduction or deduction from final pay, the Buyer authorizes the Company to deduct the amount stated in Section 3 from the Buyer's compensation in accordance with company policy and applicable law.</li>
+    <li>This form, together with the Official/Acknowledgment Receipt referenced in Section 3, serves as the Buyer's <b>proof of purchase</b>.</li>
+  </ol>
+
+  <h2>5. Acknowledgment and Approval</h2>
+  <div class="signs">
+    <div class="sg"><div class="line">${E(o.bo_buyer_name||o.emp_name||'')}</div><div class="role">Buyer (Employee) &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtDate(o.bo_buyer_date))}</span></div></div>
+    <div class="sg"><div class="line">${E(o.sg2_name||'')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtDate(o.sg2_date))}</span></div></div>
+    <div class="sg"><div class="line">${E(o.bo_rcvd_name||'')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtDate(o.bo_rcvd_date))}</span></div></div>
+    <div class="sg"><div class="line">${E(o.bo_approved_by||'')}</div><div class="role">Approved by &mdash; Management / Finance</div><div class="dt">Date:<span></span></div></div>
+  </div>
+
+  <div class="stub">
+    <div class="t">Acknowledgment Receipt</div>
+    <p>Received from <u>${B(o.emp_name,30)}</u> the amount of <u>PHP ${B(amt,12)}</u> (<u>${B(words,40)}</u>) as full payment for the IT asset(s) listed above under Buyout Ref. No. <u>${E(ref)}</u>.</p>
+    <p>OR / AR No. <u>${B(o.bo_or_no,16)}</u> &nbsp; Date <u>${B(fmtDate(o.bo_date),16)}</u> &nbsp; Received by <u>${B(o.bo_rcvd_name,30)}</u> (signature over printed name)</p>
+  </div>
+  <div class="foot"><span>${E(co)} &middot; IT Asset Buyout Form</span><span>${E(ref)} &middot; Generated ${E(today)}</span></div>
+</div>
+<script>window.addEventListener('load',()=>{ setTimeout(()=>{ try{ window.print(); }catch(e){} }, 400); });<\/script>
+</body></html>`;
+  }
+  document.getElementById('btnBuyoutForm').addEventListener('click', () => {
+    const w = window.open('', '_blank');
+    if (!w) { alert('Pop-up blocked — please allow pop-ups for this site to generate the buyout form.'); return; }
+    w.document.open(); w.document.write(buildBuyoutDoc()); w.document.close();
+  });
 })();
