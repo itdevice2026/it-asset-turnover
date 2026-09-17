@@ -181,6 +181,22 @@
   modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) modal.hidden = true; });
 
+  // Clear form: wipe all entries of the current form (keeps company, control no. and form date; attachments stay)
+  const btnClear = document.createElement('button'); btnClear.className = 'btn'; btnClear.id = 'btnClear'; btnClear.textContent = 'Clear form';
+  btnClear.title = 'Erase all entries in this form (company and control number are kept)';
+  const btnSave = document.getElementById('btnSave'); if (btnSave) btnSave.insertAdjacentElement('afterend', btnClear);
+  let clearTimer = null;
+  btnClear.addEventListener('click', () => {
+    if (btnClear.dataset.armed !== '1') { btnClear.dataset.armed = '1'; btnClear.textContent = 'Confirm clear?'; btnClear.style.borderColor = 'var(--crit)'; btnClear.style.color = 'var(--crit)'; clearTimer = setTimeout(disarm, 4000); return; }
+    clearTimeout(clearTimer); disarm();
+    const keep = new Set(['company', 'company_other', 'ctrl_no', 'form_date']);
+    form.querySelectorAll('input,textarea,select').forEach(el => { if (!el.name || keep.has(el.name)) return; if (el.type === 'checkbox' || el.type === 'radio') el.checked = false; else el.value = ''; });
+    form.dispatchEvent(new Event('input', { bubbles: true })); // triggers refresh/autosave in the main script
+    const st = document.getElementById('state'); if (st) st.textContent = 'Form cleared';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  function disarm(){ btnClear.dataset.armed = ''; btnClear.textContent = 'Clear form'; btnClear.style.borderColor = ''; btnClear.style.color = ''; }
+
   // Toolbar button (next to "IT users" / Data menu)
   const btn = document.createElement('button'); btn.className = 'btn'; btn.id = 'btnSignatures'; btn.textContent = 'Signatures';
   btn.onclick = async () => { modal.hidden = false; msg(''); try { await load(); render(); } catch (e) { $('#smRows').innerHTML = `<tr><td colspan="3" style="color:var(--crit);padding:12px">${E(e.message)}</td></tr>`; } };
