@@ -109,6 +109,20 @@
   const form = document.getElementById('form');
   form.addEventListener('input', e => { if (e.target && NAME_FIELDS.includes(e.target.name)) applyTo(e.target); });
   setInterval(applyAll, 500); // fill()/newForm() set values without events
+
+  // "Turned over by" always reflects the Employee Name from Section 1
+  const empName = document.querySelector('[name=emp_name]'), sg1 = document.querySelector('[name=sg1_name]');
+  function mirrorEmployee(force){
+    if (!empName || !sg1) return;
+    const v = empName.value.trim();
+    if (force || (v && sg1.value.trim() !== v)) { sg1.value = v; sg1.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  if (empName && sg1) {
+    sg1.readOnly = true; sg1.title = 'Automatically filled from the Employee Name in Section 1';
+    empName.addEventListener('input', () => mirrorEmployee(true));
+    setInterval(() => mirrorEmployee(false), 500);
+    mirrorEmployee(false);
+  }
   window.itatSignatureFor = name => (find(name) || {}).data_url || ''; // used by the generated Buyout Form
 
   /* ---------- modal ---------- */
