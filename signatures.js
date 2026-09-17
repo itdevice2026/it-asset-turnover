@@ -6,8 +6,8 @@
   css.textContent = `
   .sig-wrap{position:relative}
   .sig-wrap.sig-on{padding-top:34px}
-  .sig-img{position:absolute;left:6px;bottom:20px;height:58px;max-width:75%;object-fit:contain;object-position:left bottom;pointer-events:none;z-index:1}
-  .sig-wrap.sig-on input{position:relative;z-index:2;background:transparent!important}
+  .sig-img{position:absolute;left:6px;bottom:20px;height:58px;max-width:75%;object-fit:contain;object-position:left bottom;pointer-events:none;z-index:3}
+  .sig-wrap.sig-on input{position:relative;z-index:1}
   .sm{position:fixed;inset:0;background:rgba(22,32,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:200;overflow:auto}
   .sm[hidden]{display:none}
   .sm .box{background:var(--paper);border:1px solid var(--line);border-radius:10px;width:820px;max-width:100%;box-shadow:0 16px 48px rgba(22,32,42,.25);display:grid;gap:14px;padding:22px 24px}
