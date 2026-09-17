@@ -141,6 +141,7 @@
       + Array.from({ length: Math.max(0, 4 - items.length) }, () => '<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
     const amt = fmtAmt(o.bo_amount), words = amountWords(o.bo_amount);
     const today = fmtDate(new Date().toISOString().slice(0,10));
+    const sig = name => { const u = (typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>IT Asset Buyout Form ${E(ref)}</title>
 <style>
 @page{size:A4;margin:14mm 14mm 16mm}
@@ -156,7 +157,7 @@ h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:#f0f0
 table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border:1px solid #333;padding:4px 5px;vertical-align:top;font-size:10.5px}th{background:#f0f0f0;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em}td.c{text-align:center}td.m{font-family:Consolas,monospace}
 .pay{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}.amt{grid-column:span 2;display:flex;gap:12px;align-items:baseline;border:1px solid #333;padding:8px 10px;margin-bottom:4px}.amt .num{font-size:16px;font-weight:700;font-family:Consolas,monospace}.amt .wds{font-style:italic}
 ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-bottom:3px}
-.signs{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px;margin-top:10px}.sg{padding-top:34px}.sg .line{border-top:1px solid #111;padding-top:3px;font-weight:700;font-size:11px}.sg .role{font-size:9.5px;color:#444}.sg .dt{font-size:9.5px;color:#444;margin-top:8px}.sg .dt span{display:inline-block;min-width:110px;border-bottom:1px solid #111;margin-left:4px;text-align:center;font-weight:600;color:#111}
+.signs{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px;margin-top:10px}.sg{padding-top:34px;position:relative}.sg img.sig{position:absolute;left:6px;bottom:44px;height:46px;max-width:70%;object-fit:contain;object-position:left bottom}.sg .line{border-top:1px solid #111;padding-top:3px;font-weight:700;font-size:11px}.sg .role{font-size:9.5px;color:#444}.sg .dt{font-size:9.5px;color:#444;margin-top:8px}.sg .dt span{display:inline-block;min-width:110px;border-bottom:1px solid #111;margin-left:4px;text-align:center;font-weight:600;color:#111}
 .stub{margin-top:18px;border:1px dashed #333;padding:10px 12px}.stub .t{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}.stub p{margin:0 0 6px;line-height:1.7}.stub u{text-decoration:none;border-bottom:1px solid #111;padding:0 8px;font-weight:600}
 .foot{margin-top:14px;font-size:9px;color:#666;display:flex;justify-content:space-between;border-top:1px solid #ccc;padding-top:4px}
 .bar{max-width:800px;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}.bar button{border:1px solid #333;background:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:12px}.bar button.p{background:#111;color:#fff}
@@ -206,7 +207,7 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
   <h2>5. Acknowledgment and Approval</h2>
   <div class="signs">
     <div class="sg"><div class="line">${E(o.bo_buyer_name||o.emp_name||'')}</div><div class="role">Buyer (Employee) &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtDate(o.bo_buyer_date))}</span></div></div>
-    <div class="sg"><div class="line">${E(o.sg2_name||'')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtDate(o.sg2_date))}</span></div></div>
+    <div class="sg">${sig(o.sg2_name)}<div class="line">${E(o.sg2_name||'')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtDate(o.sg2_date))}</span></div></div>
     <div class="sg"><div class="line">${E(o.bo_rcvd_name||'')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtDate(o.bo_rcvd_date))}</span></div></div>
     <div class="sg"><div class="line">${E(o.bo_approved_by||'')}</div><div class="role">Approved by &mdash; Management / Finance</div><div class="dt">Date:<span></span></div></div>
   </div>
