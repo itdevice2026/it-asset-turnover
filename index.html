@@ -117,6 +117,7 @@ textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:4
 .rec-foot{font-size:12px;color:var(--faint);margin-top:12px;display:flex;justify-content:space-between}
 .status-pill{display:inline-block;font-family:var(--head);font-size:10px;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:1px 8px;margin-top:3px}
 .status-pill.draft{background:var(--sunken);color:var(--muted)} .status-pill.complete{background:#DFF1E5;color:#2A7A4B}
+.status-pill.buyout{background:#FFF1D6;color:#9A5B00;white-space:nowrap} .status-pill.buyout-paid{background:#E3ECFA;color:#1F4E9E;white-space:nowrap}
 /* attachments */
 .attach-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 10px}
 .attach-bar select{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--paper)}
@@ -233,6 +234,7 @@ footer{margin-top:20px;font-size:11px;color:var(--faint);display:flex;justify-co
       <input id="q" type="search" placeholder="Search records…" autocomplete="off">
       <select id="qCompany" aria-label="Filter by company"><option value="">All companies</option></select>
       <select id="qReason" aria-label="Filter by reason"><option value="">All reasons</option><option>Resignation</option><option>Termination</option><option>Transfer</option><option>Reassignment</option><option>Replacement</option><option>Other</option></select>
+      <select id="qBuyout" aria-label="Filter by buyout"><option value="">All records</option><option value="any">Buyout (any)</option><option value="ongoing">Buyout – ongoing</option><option value="paid">Buyout – paid</option><option value="none">No buyout</option></select>
     </div>
   </div>
   <div class="tablewrap rec-table">
@@ -495,6 +497,9 @@ function refresh(){ form.querySelectorAll('.ck').forEach(l=>{ const c=l.querySel
 function reasonOf(o){ const r=[]; if(o.r_resign) r.push('Resignation'); if(o.r_term) r.push('Termination'); if(o.r_transfer) r.push('Transfer'); if(o.r_reassign) r.push('Reassignment'); if(o.r_replace) r.push('Replacement'); if(o.r_other) r.push('Other'+(o.r_other_txt?': '+o.r_other_txt:'')); return r.join(', '); }
 function assetsOf(o){ return ASSETS.map((a,i)=>({type:a,tag:o[`a${i}_tag`]||'',sn:o[`a${i}_sn`]||'',desc:o[`a${i}_desc`]||''})).filter(x=>x.tag||x.sn||x.desc); }
 function isComplete(o){ return !!(o.sg1_name && o.sg2_name); }
+function buyoutOf(o){ const on=o.bo_enabled===true||o.bo_enabled==='true'||o.bo_enabled==='on'||o.bo_enabled===1; if(!on) return ''; return String(o.bo_or_no||'').trim()?'paid':'ongoing'; }
+function buyoutPill(o){ const b=buyoutOf(o); return b?`<span class="status-pill ${b==='paid'?'buyout-paid':'buyout'}" title="${b==='paid'?'Asset buyout – OR/AR no. recorded':'Asset buyout in progress – no OR/AR no. yet'}">${b==='paid'?'Buyout · paid':'Buyout · ongoing'}</span>`:''; }
+function buyoutMatch(o,f){ const b=buyoutOf(o); return !f || (f==='any'?!!b : f==='none'?!b : b===f); }
 
 let saveTimer;
 async function saveCurrent(explicit, quiet){
@@ -571,21 +576,21 @@ function updateCount(){ document.getElementById('recCount').textContent=store.re
 let sortKey='_updated', sortAsc=false;
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function hl(text,q){ const t=esc(text); if(!q) return t; const i=t.toLowerCase().indexOf(q.toLowerCase()); if(i<0) return t; return t.slice(0,i)+'<mark>'+t.slice(i,i+q.length)+'</mark>'+t.slice(i+q.length); }
-function haystack(r){ return [r.ctrl_no,companyName(r),r.emp_name,r.emp_id,r.emp_dept,r.emp_pos,r.emp_sup,r.emp_date,reasonOf(r),r.findings,...assetsOf(r).flatMap(a=>[a.type,a.tag,a.sn,a.desc]),...ASSETS.map((a,i)=>r[`a${i}_rem`]),r.sg1_name,r.sg2_name,r.sg3_name,...(r.attachments||[]).flatMap(a=>[a.name,a.kind])].filter(Boolean).join(' ').toLowerCase(); }
+function haystack(r){ return [r.ctrl_no,companyName(r),r.emp_name,r.emp_id,r.emp_dept,r.emp_pos,r.emp_sup,r.emp_date,reasonOf(r),r.findings,...assetsOf(r).flatMap(a=>[a.type,a.tag,a.sn,a.desc]),...ASSETS.map((a,i)=>r[`a${i}_rem`]),r.sg1_name,r.sg2_name,r.sg3_name,buyoutOf(r)?'buyout '+buyoutOf(r):'',...(r.attachments||[]).flatMap(a=>[a.name,a.kind])].filter(Boolean).join(' ').toLowerCase(); }
 function renderRecords(){
   const q=document.getElementById('q').value.trim(), terms=q.toLowerCase().split(/\s+/).filter(Boolean);
-  const fc=document.getElementById('qCompany').value, fr=document.getElementById('qReason').value;
+  const fc=document.getElementById('qCompany').value, fr=document.getElementById('qReason').value, fb=document.getElementById('qBuyout').value;
   // company filter options
   const sel=document.getElementById('qCompany'), companies=[...new Set([...store.records.values()].map(companyName).filter(Boolean))].sort();
   sel.innerHTML='<option value="">All companies</option>'+companies.map(c=>`<option ${c===fc?'selected':''}>${esc(c)}</option>`).join('');
-  let rows=[...store.records.values()].filter(r=>{ if(fc && companyName(r)!==fc) return false; if(fr && !reasonOf(r).startsWith(fr)) return false; if(!terms.length) return true; const h=haystack(r); return terms.every(t=>h.includes(t)); });
+  let rows=[...store.records.values()].filter(r=>{ if(fc && companyName(r)!==fc) return false; if(fr && !reasonOf(r).startsWith(fr)) return false; if(!buyoutMatch(r,fb)) return false; if(!terms.length) return true; const h=haystack(r); return terms.every(t=>h.includes(t)); });
   rows.sort((a,b)=>{ const va=(sortKey==='company'?companyName(a):a[sortKey])||'', vb=(sortKey==='company'?companyName(b):b[sortKey])||''; return (sortAsc?1:-1)*(va<vb?-1:va>vb?1:0)*-1; });
   document.querySelectorAll('.rec-table th[data-sort]').forEach(th=>{ th.classList.toggle('sorted',th.dataset.sort===sortKey); th.classList.toggle('asc',th.dataset.sort===sortKey&&sortAsc); });
   const tb=document.getElementById('recRows');
   if(!rows.length){ tb.innerHTML=`<tr><td colspan="9" class="rec-empty">${store.records.size?'No records match your search.':'No records yet. Fill in the form and it is saved here automatically.'}</td></tr>`; }
   else tb.innerHTML=rows.map(r=>{ const as=assetsOf(r); const q1=terms[0]||'';
     return `<tr data-id="${r._id}">
-      <td><div class="ctrl">${hl(r.ctrl_no||'—',q1)}</div><span class="status-pill ${isComplete(r)?'complete':'draft'}">${isComplete(r)?'Signed':'Draft'}</span>${(r.attachments||[]).length?`<div class="meta" style="font-size:11px;color:var(--muted);margin-top:3px">📎 ${r.attachments.length} file${r.attachments.length===1?'':'s'}</div>`:''}</td>
+      <td><div class="ctrl">${hl(r.ctrl_no||'—',q1)}</div><span class="status-pill ${isComplete(r)?'complete':'draft'}">${isComplete(r)?'Signed':'Draft'}</span>${buyoutPill(r)}${(r.attachments||[]).length?`<div class="meta" style="font-size:11px;color:var(--muted);margin-top:3px">📎 ${r.attachments.length} file${r.attachments.length===1?'':'s'}</div>`:''}</td>
       <td>${hl(companyName(r)||'—',q1)}</td>
       <td><b>${hl(r.emp_name||'—',q1)}</b><div style="color:var(--muted);font-size:11.5px">${hl(r.emp_id||'',q1)}${r.emp_pos?' · '+hl(r.emp_pos,q1):''}</div></td>
       <td>${hl(r.emp_dept||'—',q1)}</td>
@@ -599,7 +604,7 @@ function renderRecords(){
   tb.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{ const r=store.records.get(b.dataset.copy); newForm(); const keep={}; ['company','company_other','emp_name','emp_id','emp_dept','emp_pos','emp_sup'].forEach(k=>keep[k]=r[k]); ASSETS.forEach((a,i)=>['tag','sn','desc'].forEach(f=>keep[`a${i}_${f}`]=r[`a${i}_${f}`])); fill({...collect(),...keep}); assignControlNo(); state.textContent='Copied details into a new form — not saved yet'; });
   tb.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const cell=b.parentElement; cell.innerHTML=`<span class="confirm">Delete? <button data-yes="${b.dataset.del}">Yes</button><button data-no>No</button></span>`; cell.querySelector('[data-yes]').onclick=async()=>{ try{ await store.del(b.dataset.del); }catch(err){ return flash('Could not delete: '+err.message); } if(currentId===b.dataset.del){ currentId=null; } updateCount(); renderRecords(); }; cell.querySelector('[data-no]').onclick=renderRecords; });
 }
-['q','qCompany','qReason'].forEach(id=>document.getElementById(id).addEventListener('input',renderRecords));
+['q','qCompany','qReason','qBuyout'].forEach(id=>document.getElementById(id).addEventListener('input',renderRecords));
 document.querySelectorAll('.rec-table th[data-sort]').forEach(th=>th.addEventListener('click',()=>{ if(sortKey===th.dataset.sort) sortAsc=!sortAsc; else { sortKey=th.dataset.sort; sortAsc=sortKey!=='_updated'; } renderRecords(); }));
 document.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){ e.preventDefault(); showView('records'); } if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); clearTimeout(saveTimer); saveCurrent(true); } });
 
@@ -626,18 +631,18 @@ document.getElementById('btnExportCsv').addEventListener('click',()=>{
 /* Print all data: one printable summary report of every record (one row per asset), honouring the Records search/filters when set */
 document.getElementById('btnPrintAll').addEventListener('click',()=>{
   const q=document.getElementById('q').value.trim(), terms=q.toLowerCase().split(/\s+/).filter(Boolean);
-  const fc=document.getElementById('qCompany').value, fr=document.getElementById('qReason').value;
-  let recs=[...store.records.values()].filter(r=>{ if(fc && companyName(r)!==fc) return false; if(fr && !reasonOf(r).startsWith(fr)) return false; if(!terms.length) return true; const h=haystack(r); return terms.every(t=>h.includes(t)); });
+  const fc=document.getElementById('qCompany').value, fr=document.getElementById('qReason').value, fb=document.getElementById('qBuyout').value;
+  let recs=[...store.records.values()].filter(r=>{ if(fc && companyName(r)!==fc) return false; if(fr && !reasonOf(r).startsWith(fr)) return false; if(!buyoutMatch(r,fb)) return false; if(!terms.length) return true; const h=haystack(r); return terms.every(t=>h.includes(t)); });
   if(!recs.length) return flash('No records to print.');
   recs.sort((a,b)=>(companyName(a)+a.ctrl_no).localeCompare(companyName(b)+b.ctrl_no));
-  const filt=[fc?'Company: '+fc:'',fr?'Reason: '+fr:'',q?'Search: "'+q+'"':''].filter(Boolean).join(' · ');
-  let rows='', n=0, assetsTotal=0, signed=0;
+  const filt=[fc?'Company: '+fc:'',fr?'Reason: '+fr:'',fb?'Buyout: '+document.getElementById('qBuyout').selectedOptions[0].textContent:'',q?'Search: "'+q+'"':''].filter(Boolean).join(' · ');
+  let rows='', n=0, assetsTotal=0, signed=0, buyouts=0;
   for(const r of recs){
-    n++; if(isComplete(r)) signed++;
+    n++; if(isComplete(r)) signed++; const bo=buyoutOf(r); if(bo) buyouts++;
     const as=ASSETS.map((a,i)=>({type:a,tag:r[`a${i}_tag`],sn:r[`a${i}_sn`],desc:r[`a${i}_desc`],cond:r[`a${i}_good`]?'Good':r[`a${i}_dmg`]?'Damaged':'',comp:r[`a${i}_yes`]?'Yes':r[`a${i}_no`]?'No':'',rem:r[`a${i}_rem`]})).filter(x=>x.tag||x.sn||x.desc);
     assetsTotal+=as.length;
-    const head=`<td class="ctrl">${esc(r.ctrl_no||'—')}<div class="st ${isComplete(r)?'ok':''}">${isComplete(r)?'Signed':'Draft'}</div></td><td>${esc(companyName(r)||'—')}</td><td><b>${esc(r.emp_name||'—')}</b><div class="sub">${esc([r.emp_id,r.emp_pos].filter(Boolean).join(' · '))}</div></td><td>${esc(r.emp_dept||'—')}</td><td class="nw">${esc(r.emp_date||'—')}</td><td>${esc(reasonOf(r)||'—')}</td>`;
-    const tail=`<td>${esc(r.sg1_name||'')}</td><td>${esc(r.sg2_name||'')}</td><td>${esc(r.sg3_name||'')}</td><td class="nw">${esc(fmtDate(r._updated))}</td>`;
+    const head=`<td class="ctrl">${esc(r.ctrl_no||'—')}<div class="st ${isComplete(r)?'ok':''}">${isComplete(r)?'Signed':'Draft'}</div>${bo?`<div class="st ${bo==='paid'?'bo-paid':'bo'}">${bo==='paid'?'Buyout · paid':'Buyout · ongoing'}</div>`:''}</td><td>${esc(companyName(r)||'—')}</td><td><b>${esc(r.emp_name||'—')}</b><div class="sub">${esc([r.emp_id,r.emp_pos].filter(Boolean).join(' · '))}</div></td><td>${esc(r.emp_dept||'—')}</td><td class="nw">${esc(r.emp_date||'—')}</td><td>${esc(reasonOf(r)||'—')}</td>`;
+    const tail=`<td>${bo?esc((bo==='paid'?'Paid':'Ongoing')+(r.bo_amount?' · ₱'+r.bo_amount:'')+(r.bo_method?' · '+r.bo_method:'')+(r.bo_or_no?' · OR/AR '+r.bo_or_no:'')):'—'}</td><td>${esc(r.sg1_name||'')}</td><td>${esc(r.sg2_name||'')}</td><td>${esc(r.sg3_name||'')}</td><td class="nw">${esc(fmtDate(r._updated))}</td>`;
     if(!as.length) rows+=`<tr>${head}<td colspan="7" class="muted">No assets listed</td>${tail}</tr>`;
     else as.forEach((a,i)=>{ rows+=`<tr>${i===0?head.replace(/<td/g,`<td rowspan="${as.length}"`):''}<td>${esc(a.type)}</td><td class="nw">${esc(a.tag||'')}</td><td class="nw">${esc(a.sn||'')}</td><td>${esc(a.desc||'')}</td><td>${esc(a.cond)}</td><td>${esc(a.comp)}</td><td>${esc(a.rem||'')}</td>${i===0?tail.replace(/<td/g,`<td rowspan="${as.length}"`):''}</tr>`; });
   }
@@ -650,16 +655,16 @@ document.getElementById('btnPrintAll').addEventListener('click',()=>{
   th,td{border:1px solid #999;padding:3px 5px;vertical-align:top;text-align:left}
   th{background:#e9eef4;font-size:10px;text-transform:uppercase;letter-spacing:.02em}
   thead{display:table-header-group}tr{page-break-inside:avoid}
-  .nw{white-space:nowrap}.sub{color:#555;font-size:9.5px}.muted{color:#777;font-style:italic}.ctrl{font-weight:700;white-space:nowrap}
-  .st{display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:8px;background:#f1f1f1;color:#666;margin-top:2px}.st.ok{background:#dff5e3;color:#1c6b32}
+  .nw{white-space:nowrap}.sub{color:#555;font-size:9.5px}.muted{color:#777;font-style:italic}.ctrl{font-weight:700}.ctrl .st{display:table;white-space:nowrap}
+  .st{display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:8px;background:#f1f1f1;color:#666;margin-top:2px}.st.ok{background:#dff5e3;color:#1c6b32}.st.bo{background:#fff1d6;color:#9a5b00}.st.bo-paid{background:#e3ecfa;color:#1f4e9e}
   .foot{margin-top:10px;color:#555;font-size:9.5px;display:flex;justify-content:space-between}
   .bar{position:fixed;top:0;right:0;padding:8px;background:#fff}.bar button{font:13px Arial;padding:6px 12px;cursor:pointer}
   @media print{.bar{display:none}body{padding:0}}
   </style></head><body>
   <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
   <h1>IT Asset Turnover — All Records</h1>
-  <div class="meta"><b>${n}</b> record${n===1?'':'s'} · <b>${assetsTotal}</b> asset line${assetsTotal===1?'':'s'} · <b>${signed}</b> signed, <b>${n-signed}</b> draft${filt?' · Filters: '+esc(filt):''} · Printed ${esc(now)}${currentUser?' by '+esc(currentUser.email):''}</div>
-  <table><thead><tr><th>Control No.</th><th>Company</th><th>Employee</th><th>Department</th><th>Date</th><th>Reason</th><th>Asset type</th><th>Asset tag</th><th>Serial no.</th><th>Description</th><th>Condition</th><th>Complete</th><th>Remarks</th><th>Turned over by</th><th>Received by (IT)</th><th>Noted by</th><th>Last updated</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="meta"><b>${n}</b> record${n===1?'':'s'} · <b>${assetsTotal}</b> asset line${assetsTotal===1?'':'s'} · <b>${signed}</b> signed, <b>${n-signed}</b> draft · <b>${buyouts}</b> with buyout${filt?' · Filters: '+esc(filt):''} · Printed ${esc(now)}${currentUser?' by '+esc(currentUser.email):''}</div>
+  <table><thead><tr><th>Control No.</th><th>Company</th><th>Employee</th><th>Department</th><th>Date</th><th>Reason</th><th>Asset type</th><th>Asset tag</th><th>Serial no.</th><th>Description</th><th>Condition</th><th>Complete</th><th>Remarks</th><th>Buyout</th><th>Turned over by</th><th>Received by (IT)</th><th>Noted by</th><th>Last updated</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="foot"><span>IT Asset Turnover System · shared online database</span><span>Generated ${esc(now)}</span></div>
   </body></html>`;
   const w=window.open('','_blank'); if(!w) return flash('Pop-up blocked — allow pop-ups for this site to print.');
