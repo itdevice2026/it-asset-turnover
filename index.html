@@ -215,6 +215,7 @@ footer{margin-top:20px;font-size:11px;color:var(--faint);display:flex;justify-co
     <div class="menu-list" id="menuList" hidden>
       <button id="btnExportJson">Export database (JSON)</button>
       <button id="btnExportCsv">Export records (CSV)</button>
+      <button id="btnPrintAll">Print all data</button>
 
     </div>
   </div>
@@ -621,6 +622,49 @@ document.getElementById('btnExportCsv').addEventListener('click',()=>{
     as.forEach(a=>rows.push([...base,...a,...tail].map(cell).join(',')));
   }
   download(`it-asset-turnover-records-${stamp()}.csv`,'﻿'+rows.join('\r\n'),'text/csv');
+});
+/* Print all data: one printable summary report of every record (one row per asset), honouring the Records search/filters when set */
+document.getElementById('btnPrintAll').addEventListener('click',()=>{
+  const q=document.getElementById('q').value.trim(), terms=q.toLowerCase().split(/\s+/).filter(Boolean);
+  const fc=document.getElementById('qCompany').value, fr=document.getElementById('qReason').value;
+  let recs=[...store.records.values()].filter(r=>{ if(fc && companyName(r)!==fc) return false; if(fr && !reasonOf(r).startsWith(fr)) return false; if(!terms.length) return true; const h=haystack(r); return terms.every(t=>h.includes(t)); });
+  if(!recs.length) return flash('No records to print.');
+  recs.sort((a,b)=>(companyName(a)+a.ctrl_no).localeCompare(companyName(b)+b.ctrl_no));
+  const filt=[fc?'Company: '+fc:'',fr?'Reason: '+fr:'',q?'Search: "'+q+'"':''].filter(Boolean).join(' · ');
+  let rows='', n=0, assetsTotal=0, signed=0;
+  for(const r of recs){
+    n++; if(isComplete(r)) signed++;
+    const as=ASSETS.map((a,i)=>({type:a,tag:r[`a${i}_tag`],sn:r[`a${i}_sn`],desc:r[`a${i}_desc`],cond:r[`a${i}_good`]?'Good':r[`a${i}_dmg`]?'Damaged':'',comp:r[`a${i}_yes`]?'Yes':r[`a${i}_no`]?'No':'',rem:r[`a${i}_rem`]})).filter(x=>x.tag||x.sn||x.desc);
+    assetsTotal+=as.length;
+    const head=`<td class="ctrl">${esc(r.ctrl_no||'—')}<div class="st ${isComplete(r)?'ok':''}">${isComplete(r)?'Signed':'Draft'}</div></td><td>${esc(companyName(r)||'—')}</td><td><b>${esc(r.emp_name||'—')}</b><div class="sub">${esc([r.emp_id,r.emp_pos].filter(Boolean).join(' · '))}</div></td><td>${esc(r.emp_dept||'—')}</td><td class="nw">${esc(r.emp_date||'—')}</td><td>${esc(reasonOf(r)||'—')}</td>`;
+    const tail=`<td>${esc(r.sg1_name||'')}</td><td>${esc(r.sg2_name||'')}</td><td>${esc(r.sg3_name||'')}</td><td class="nw">${esc(fmtDate(r._updated))}</td>`;
+    if(!as.length) rows+=`<tr>${head}<td colspan="7" class="muted">No assets listed</td>${tail}</tr>`;
+    else as.forEach((a,i)=>{ rows+=`<tr>${i===0?head.replace(/<td/g,`<td rowspan="${as.length}"`):''}<td>${esc(a.type)}</td><td class="nw">${esc(a.tag||'')}</td><td class="nw">${esc(a.sn||'')}</td><td>${esc(a.desc||'')}</td><td>${esc(a.cond)}</td><td>${esc(a.comp)}</td><td>${esc(a.rem||'')}</td>${i===0?tail.replace(/<td/g,`<td rowspan="${as.length}"`):''}</tr>`; });
+  }
+  const now=new Date().toLocaleString([], {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>IT Asset Turnover — All records</title><style>
+  @page{size:A4 landscape;margin:12mm 10mm}
+  body{font:10.5px/1.35 Arial,Helvetica,sans-serif;color:#111;margin:0;padding:12px}
+  h1{font-size:17px;margin:0 0 2px}.meta{color:#555;font-size:10.5px;margin-bottom:8px}.meta b{color:#111}
+  table{width:100%;border-collapse:collapse;table-layout:auto}
+  th,td{border:1px solid #999;padding:3px 5px;vertical-align:top;text-align:left}
+  th{background:#e9eef4;font-size:10px;text-transform:uppercase;letter-spacing:.02em}
+  thead{display:table-header-group}tr{page-break-inside:avoid}
+  .nw{white-space:nowrap}.sub{color:#555;font-size:9.5px}.muted{color:#777;font-style:italic}.ctrl{font-weight:700;white-space:nowrap}
+  .st{display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:8px;background:#f1f1f1;color:#666;margin-top:2px}.st.ok{background:#dff5e3;color:#1c6b32}
+  .foot{margin-top:10px;color:#555;font-size:9.5px;display:flex;justify-content:space-between}
+  .bar{position:fixed;top:0;right:0;padding:8px;background:#fff}.bar button{font:13px Arial;padding:6px 12px;cursor:pointer}
+  @media print{.bar{display:none}body{padding:0}}
+  </style></head><body>
+  <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+  <h1>IT Asset Turnover — All Records</h1>
+  <div class="meta"><b>${n}</b> record${n===1?'':'s'} · <b>${assetsTotal}</b> asset line${assetsTotal===1?'':'s'} · <b>${signed}</b> signed, <b>${n-signed}</b> draft${filt?' · Filters: '+esc(filt):''} · Printed ${esc(now)}${currentUser?' by '+esc(currentUser.email):''}</div>
+  <table><thead><tr><th>Control No.</th><th>Company</th><th>Employee</th><th>Department</th><th>Date</th><th>Reason</th><th>Asset type</th><th>Asset tag</th><th>Serial no.</th><th>Description</th><th>Condition</th><th>Complete</th><th>Remarks</th><th>Turned over by</th><th>Received by (IT)</th><th>Noted by</th><th>Last updated</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="foot"><span>IT Asset Turnover System · shared online database</span><span>Generated ${esc(now)}</span></div>
+  </body></html>`;
+  const w=window.open('','_blank'); if(!w) return flash('Pop-up blocked — allow pop-ups for this site to print.');
+  w.document.open(); w.document.write(html); w.document.close();
+  w.addEventListener('load',()=>setTimeout(()=>w.print(),300));
 });
 /* ===================== Auth + boot ===================== */
 const loginEl=document.getElementById('login'), loginForm=document.getElementById('loginForm'), loginErr=document.getElementById('loginErr');
