@@ -20,11 +20,25 @@
   .bo-signs .sign{background:var(--paper)}
   .bo-total{font-family:var(--mono);font-weight:600}
   .bo-gen{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .bo-pay{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 16px;align-items:end;border-top:1px dashed var(--line);padding-top:12px}
+  .bo-pay .f{grid-template-columns:1fr;gap:3px}
+  .bo-pay select{border:0;border-bottom:1px solid var(--line);padding:3px 4px;background:transparent;width:100%}
+  .bo-bal{font-family:var(--mono);font-weight:600;font-size:14px;padding:3px 0;border-bottom:1px solid var(--line)}
+  .bo-badge{display:inline-block;font-family:var(--head);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:2px 9px;border:2px solid;margin-left:10px;vertical-align:middle}
+  .bo-badge.paid{color:#2A7A4B;border-color:#2A7A4B;background:#DFF1E5}
+  .bo-badge.partial{color:#9A5B00;border-color:#C98A1B;background:#FFF1D6}
+  .bo-badge.unpaid{color:#B3261E;border-color:#B3261E;background:#FBE3E1}
+  .bo-badge[hidden]{display:none}
+  .rec-pay{display:inline-block;font-family:var(--head);font-size:10px;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:1px 8px;margin:3px 0 0 4px}
+  .rec-pay.paid{background:#DFF1E5;color:#2A7A4B} .rec-pay.partial{background:#FFF1D6;color:#9A5B00} .rec-pay.unpaid{background:#FBE3E1;color:#B3261E}
+  @media(max-width:700px){.bo-pay{grid-template-columns:1fr 1fr}}
   @media print{.bo-gen{display:none!important}}
   @media(max-width:700px){.bo-grid{grid-template-columns:1fr 1fr}.bo-signs{grid-template-columns:1fr}}
   @media print{
     .bo-body{background:#fff;border-color:#000}
     .bo-terms{color:#000;border-left-color:#000;background:#fff}
+    .bo-pay select{border-bottom:1px solid #777;background:#fff}
+    .bo-badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .bo-grid select{border-bottom:1px solid #777;background:#fff}
     .bo-off .bo-body{display:none!important}
     .bo-off .bo-none{display:block!important}
@@ -40,7 +54,7 @@
   const sec = document.createElement('section');
   sec.className = 'buyout-sec bo-off';
   sec.innerHTML = `
-    <h2>7. Asset Buyout / Proof of Purchase</h2>
+    <h2>7. Asset Buyout / Proof of Purchase <span class="bo-badge" id="boBadge" hidden></span></h2>
     <div class="bo-head"><input type="checkbox" id="boEnabled" name="bo_enabled"><label for="boEnabled"><b>The employee is purchasing (buying out) IT asset(s) listed in this turnover</b></label></div>
     <div class="bo-none" style="display:none;font-size:11px;color:#555">No asset buyout — all items surrendered to the company.</div>
     <div class="bo-body" id="boBody" hidden>
@@ -54,6 +68,12 @@
         <div class="f"><label>Basis of valuation</label><select name="bo_basis"><option value="">— Select —</option><option>Net book value</option><option>Fair market / appraised value</option><option>Fully depreciated (nominal value)</option><option>Company-approved price list</option><option>Other</option></select></div>
         <div class="f"><label>Approved by (Management / Finance)</label><input name="bo_approved_by"></div>
         <div class="f wide"><label>Remarks (condition sold, inclusions, accessories, warranty status)</label><input name="bo_remarks"></div>
+      </div>
+      <div class="bo-pay">
+        <div class="f"><label>Payment status</label><select name="bo_pay_status" id="boPayStatus"><option value="">— Select —</option><option>Unpaid</option><option>Partially paid</option><option>Fully paid</option></select></div>
+        <div class="f"><label>Amount paid to date (PHP)</label><input name="bo_amount_paid" inputmode="decimal" placeholder="0.00"></div>
+        <div class="f"><label>Balance (PHP)</label><div class="bo-bal" id="boBalance">—</div></div>
+        <div class="f"><label>Date fully paid</label><input name="bo_paid_date" type="date"></div>
       </div>
       <div class="bo-gen noprint"><button type="button" class="btn" id="btnBuyoutForm">Generate Buyout Form</button><span class="hint" style="margin:0">Opens the printable IT Asset Buyout Form (Deed of Sale &amp; Proof of Purchase) filled from this record.</span></div>
       <div class="bo-terms"><b>Terms of sale.</b> The item(s) ticked above are sold to the employee on an <b>"as-is, where-is"</b> basis, with no warranty from the company. Company data, licenses and accounts have been removed or transferred before release. Upon full payment, ownership passes to the employee and the item(s) are removed from the company's fixed-asset register. This section, together with the official receipt referenced above, serves as the employee's <b>proof of purchase</b>.</div>
@@ -99,6 +119,59 @@
   form.addEventListener('input', () => { if (body.hidden === enabled.checked) sync(); });
   setInterval(() => { if (body.hidden === enabled.checked) sync(); else refreshTags(); }, 300);
 
+  // ---- Payment status (is the buyout already paid?) ----
+  const num = v => { const n = parseFloat(String(v ?? '').replace(/[^0-9.]/g, '')); return isFinite(n) ? n : 0; };
+  const money = n => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function payInfo(o){
+    if (!o.bo_enabled) return null;
+    const amount = num(o.bo_amount), paid = num(o.bo_amount_paid);
+    let status = o.bo_pay_status || '';
+    if (!status) status = amount > 0 && paid >= amount ? 'Fully paid' : paid > 0 ? 'Partially paid' : 'Unpaid';
+    const cls = status === 'Fully paid' ? 'paid' : status === 'Partially paid' ? 'partial' : 'unpaid';
+    const balance = Math.max(0, amount - (status === 'Fully paid' ? amount : paid));
+    return { status, cls, amount, paid: status === 'Fully paid' ? amount : paid, balance, label: status === 'Fully paid' ? 'PAID' : status === 'Partially paid' ? 'PARTIALLY PAID' : 'UNPAID' };
+  }
+  window.itatBuyoutPayInfo = payInfo;
+  const badge = document.getElementById('boBadge'), balEl = document.getElementById('boBalance'), payStatusEl = document.getElementById('boPayStatus');
+  function refreshPay(){
+    const o = collect(); const p = payInfo(o);
+    if (!p) { badge.hidden = true; balEl.textContent = '—'; return; }
+    badge.hidden = false; badge.className = 'bo-badge ' + p.cls; badge.textContent = p.label + (p.cls === 'paid' && o.bo_paid_date ? ' · ' + o.bo_paid_date : '');
+    balEl.textContent = p.amount ? 'PHP ' + money(p.balance) : '—';
+    balEl.style.color = p.balance > 0 ? '#B3261E' : '#2A7A4B';
+  }
+  payStatusEl.addEventListener('change', () => {
+    const o = collect(); const paidEl = document.querySelector('[name=bo_amount_paid]'), dateEl = document.querySelector('[name=bo_paid_date]');
+    if (payStatusEl.value === 'Fully paid') { if (o.bo_amount) paidEl.value = o.bo_amount; if (!dateEl.value) dateEl.value = o.bo_date || new Date().toISOString().slice(0,10); }
+    if (payStatusEl.value === 'Unpaid') { paidEl.value = ''; dateEl.value = ''; }
+    form.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  form.addEventListener('input', refreshPay);
+  setInterval(refreshPay, 600);
+
+  // Records list: show the buyout payment status under the Draft/Signed pill, plus a filter
+  const recRows = document.getElementById('recRows');
+  const qReason = document.getElementById('qReason');
+  let qPay = null;
+  if (qReason) {
+    qPay = document.createElement('select'); qPay.id = 'qPay'; qPay.setAttribute('aria-label', 'Filter by buyout payment');
+    qPay.innerHTML = '<option value="">All records</option><option value="any">With buyout</option><option value="unpaid">Buyout unpaid / partial</option><option value="paid">Buyout paid</option>';
+    qReason.insertAdjacentElement('afterend', qPay);
+    qPay.addEventListener('change', decorateRecords);
+  }
+  function decorateRecords(){
+    if (!recRows || typeof store === 'undefined') return;
+    recRows.querySelectorAll('tr[data-id]').forEach(tr => {
+      const r = store.records.get(tr.dataset.id); const p = r ? payInfo(r) : null;
+      let el = tr.querySelector('.rec-pay');
+      if (p) { if (!el) { el = document.createElement('span'); el.className = 'rec-pay'; const pill = tr.querySelector('.status-pill'); (pill || tr.firstElementChild).insertAdjacentElement(pill ? 'afterend' : 'beforeend', el); } el.className = 'rec-pay ' + p.cls; el.textContent = 'Buyout: ' + p.label + (p.balance > 0 ? ' · bal ' + money(p.balance) : ''); }
+      else if (el) el.remove();
+      const f = qPay ? qPay.value : '';
+      tr.hidden = f === 'any' ? !p : f === 'unpaid' ? !(p && p.cls !== 'paid') : f === 'paid' ? !(p && p.cls === 'paid') : false;
+    });
+  }
+  if (recRows) new MutationObserver(() => { if (!recRows.dataset.busy) { recRows.dataset.busy = '1'; decorateRecords(); delete recRows.dataset.busy; } }).observe(recRows, { childList: true });
+
   // Section 6: extra asset status
   const statusChecks = document.querySelector('.status .checks');
   if (statusChecks && !document.querySelector('[name=s_sold]')) {
@@ -141,6 +214,7 @@
       + Array.from({ length: Math.max(0, 4 - items.length) }, () => '<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
     const amt = fmtAmt(o.bo_amount), words = amountWords(o.bo_amount);
     const today = fmtDate(new Date().toISOString().slice(0,10));
+    const pay = payInfo(o);
     const sig = name => { const u = (typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>IT Asset Buyout Form ${E(ref)}</title>
 <style>
@@ -159,6 +233,7 @@ table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border:1px solid 
 ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-bottom:3px}
 .signs{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px;margin-top:10px}.sg{padding-top:34px;position:relative}.sg img.sig{position:absolute;left:6px;bottom:44px;height:46px;max-width:70%;object-fit:contain;object-position:left bottom}.sg .line{border-top:1px solid #111;padding-top:3px;font-weight:700;font-size:11px}.sg .role{font-size:9.5px;color:#444}.sg .dt{font-size:9.5px;color:#444;margin-top:8px}.sg .dt span{display:inline-block;min-width:110px;border-bottom:1px solid #111;margin-left:4px;text-align:center;font-weight:600;color:#111}
 .stub{margin-top:18px;border:1px dashed #333;padding:10px 12px}.stub .t{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}.stub p{margin:0 0 6px;line-height:1.7}.stub u{text-decoration:none;border-bottom:1px solid #111;padding:0 8px;font-weight:600}
+.sheet{position:relative}.stamp{position:absolute;right:32px;top:110px;transform:rotate(-8deg);border:3px solid;border-radius:6px;padding:4px 14px;font-weight:800;font-size:20px;letter-spacing:.12em;text-align:center;opacity:.85;-webkit-print-color-adjust:exact;print-color-adjust:exact}.stamp small{display:block;font-size:9px;letter-spacing:.04em;font-weight:600}.stamp.paid{color:#2A7A4B;border-color:#2A7A4B}.stamp.partial{color:#9A5B00;border-color:#C98A1B}.stamp.unpaid{color:#B3261E;border-color:#B3261E}
 .foot{margin-top:14px;font-size:9px;color:#666;display:flex;justify-content:space-between;border-top:1px solid #ccc;padding-top:4px}
 .bar{max-width:800px;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}.bar button{border:1px solid #333;background:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:12px}.bar button.p{background:#111;color:#fff}
 @media print{body{background:#fff;padding:0}.sheet{box-shadow:none;padding:0;max-width:none}.bar{display:none}.stub{break-inside:avoid}.signs{break-inside:avoid}}
@@ -167,6 +242,7 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
 <div class="sheet">
   <div class="hdr">${logo ? `<img src="${logo}" alt="">` : ''}<div><div class="co">${E(co)}</div><div class="sub">Information Technology Department</div></div>
     <div class="ref">Buyout Ref. No.: <b>${E(ref)}</b><br>Turnover Control No.: <b>${E(o.ctrl_no||'')}</b><br>Date generated: ${E(today)}</div></div>
+  ${pay ? `<div class="stamp ${pay.cls}">${pay.label}${pay.cls === 'paid' && o.bo_paid_date ? '<small>' + E(fmtDate(o.bo_paid_date)) + '</small>' : pay.balance > 0 ? '<small>Balance PHP ' + E(money(pay.balance)) + '</small>' : ''}</div>` : ''}
   <h1>IT ASSET BUYOUT FORM</h1>
   <div class="tagline">Deed of Sale of Company IT Asset to Employee &middot; Proof of Purchase</div>
 
@@ -191,6 +267,8 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Payment method</span><div class="val">${E(o.bo_method||'')}</div></div>
     <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">OR / AR No.</span><div class="val" style="font-family:Consolas,monospace">${E(o.bo_or_no||'')}</div></div>
     <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Date paid</span><div class="val">${E(fmtDate(o.bo_date))}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Payment status</span><div class="val">${pay ? E(pay.status) + (pay.cls === 'paid' && o.bo_paid_date ? ' (' + E(fmtDate(o.bo_paid_date)) + ')' : '') : ''}</div></div>
+    <div class="f" style="border-bottom:1px solid #999;padding:2px 0"><span class="lbl">Amount paid / Balance</span><div class="val">${pay && pay.amount ? 'PHP ' + E(money(pay.paid)) + ' / balance PHP ' + E(money(pay.balance)) : ''}</div></div>
     <div class="f" style="border-bottom:1px solid #999;padding:2px 0;grid-column:span 2"><span class="lbl">Remarks / inclusions</span><div class="val">${E(o.bo_remarks||'')}</div></div>
   </div>
 
