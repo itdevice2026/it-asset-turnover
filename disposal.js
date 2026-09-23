@@ -255,8 +255,10 @@
         <h3>Status &amp; approval</h3>
         <div class="grid">
           <label>Status <select name="status">${STATUSES.map(s => `<option>${s}</option>`).join('')}</select></label>
-          <label class="w2">Approved by <input name="approved_by"></label>
+          <label class="w2">Approved by (Management) <input name="approved_by"></label>
           <label>Approval date <input name="approved_date" type="date"></label>
+          <label class="w2">Co-signatory — IT Manager <input name="it_manager" placeholder="IT Manager's name"></label>
+          <label class="w2">Co-signatory — Administrative Department <input name="admin_signatory" placeholder="Administrative Department signatory"></label>
         </div>
         <h3>Disposal</h3>
         <div class="grid">
@@ -276,7 +278,8 @@
   function fillCompanies(){ const s = F.elements.company; const cur = s.value; s.innerHTML = '<option value="">— select —</option>' + companies().map(c => `<option>${E(c.name)}</option>`).join('') + [...new Set(rows.map(r => r.company).filter(n => n && !companies().some(c => c.name === n)))].map(n => `<option>${E(n)}</option>`).join(''); s.value = cur; }
   function openEdit(rec, presets){
     fillCompanies(); F.reset(); dmMsg('');
-    const r = rec || { status: 'For evaluation', qty: 1, assessed_date: today(), assessed_by: (typeof currentUser !== 'undefined' && currentUser) ? (currentUser.user_metadata?.full_name || '') : '', company: (typeof companyName === 'function' && typeof collect === 'function') ? companyName(collect()) : '', ...(presets || {}) };
+    const last = k => (rows.find(x => x[k]) || {})[k] || ''; // reuse the co-signatories from the most recent item
+    const r = rec || { status: 'For evaluation', qty: 1, assessed_date: today(), it_manager: last('it_manager'), admin_signatory: last('admin_signatory'), assessed_by: (typeof currentUser !== 'undefined' && currentUser) ? (currentUser.user_metadata?.full_name || '') : '', company: (typeof companyName === 'function' && typeof collect === 'function') ? companyName(collect()) : '', ...(presets || {}) };
     for (const el of F.elements) { if (!el.name || el.name === 'ref_no_view') continue; if (el.type === 'checkbox') el.checked = !!r[el.name]; else el.value = r[el.name] ?? ''; }
     if (r.company && !F.elements.company.value) { F.elements.company.insertAdjacentHTML('beforeend', `<option>${E(r.company)}</option>`); F.elements.company.value = r.company; }
     F.elements.ref_no_view.value = r.ref_no || (r.company ? nextRef(r.company) + ' (auto)' : 'auto');
@@ -336,7 +339,8 @@
     const picked = [...pm.querySelectorAll('#pmRows input[type=checkbox]:checked')].map(c => candidates[+c.dataset.i]);
     if (!picked.length) { pm.querySelector('#pmMsg').textContent = 'Tick at least one asset.'; return; }
     const btn = pm.querySelector('#pmAdd'); btn.disabled = true; btn.textContent = 'Adding…';
-    try { for (const c of picked) { const { why, pre, emp, ...rec } = c; await save(rec); } pm.hidden = true; flash(`${picked.length} asset(s) added to the disposal list.`); if (view.hidden) showView('disposal'); }
+    const last = k => (rows.find(x => x[k]) || {})[k] || ''; // reuse the co-signatories from the most recent item
+    try { for (const c of picked) { const { why, pre, emp, ...rec } = c; rec.it_manager = last('it_manager'); rec.admin_signatory = last('admin_signatory'); await save(rec); } pm.hidden = true; flash(`${picked.length} asset(s) added to the disposal list.`); if (view.hidden) showView('disposal'); }
     catch (e) { pm.querySelector('#pmMsg').textContent = e.message; pm.querySelector('#pmMsg').classList.add('err'); }
     btn.disabled = false; btn.textContent = 'Add selected to disposal list';
   };
@@ -359,7 +363,7 @@
 
   /* ===================== CSV ===================== */
   function exportCsv(){
-    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','remarks','created_at','updated_at'];
+    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','it_manager','admin_signatory','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','remarks','created_at','updated_at'];
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const text = [cols.join(','), ...filtered().map(r => cols.map(c => q(c === 'data_wiped' ? (r[c] ? 'Yes' : 'No') : r[c])).join(','))].join('\r\n');
     if (typeof download === 'function') download('it-asset-disposal-' + today() + '.csv', '\ufeff' + text, 'text/csv');
@@ -406,6 +410,8 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
   <table><thead><tr><th style="width:22px">#</th><th style="width:118px">Ref. No.</th><th>Company</th><th>Asset / Description</th><th style="width:105px">Tag / Serial</th><th>Last user / Dept.</th><th>Reason / defect</th><th style="width:80px">Assessed by</th><th style="width:66px">Status</th><th>Disposal</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="10" class="c">No items</td></tr>'}</tbody></table>
   <div class="signs">
     <div class="sg"><div class="line"></div><div class="role">Prepared by &mdash; IT Department</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg"><div class="line">${E([...new Set(items.map(r => r.it_manager).filter(Boolean))].join(', '))}</div><div class="role">Co-signatory &mdash; IT Manager</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg"><div class="line">${E([...new Set(items.map(r => r.admin_signatory).filter(Boolean))].join(', '))}</div><div class="role">Co-signatory &mdash; Administrative Department</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line"></div><div class="role">Noted by &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
   </div>
   <div class="foot"><span>${E(co)} &middot; Irreparable IT Assets for Disposal</span><span>Generated ${E(gen)}</span></div>
@@ -425,7 +431,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
     const recips = [...new Set(items.map(r => r.recipient).filter(Boolean))].join(', ');
     const refs = [...new Set(items.map(r => r.disposal_ref).filter(Boolean))].join(', ');
     const dates = [...new Set(items.map(r => r.disposal_date).filter(Boolean))].map(fmtD).join(', ');
-    const assessors = [...new Set(items.map(r => r.assessed_by).filter(Boolean))]; const approvers = [...new Set(items.map(r => r.approved_by).filter(Boolean))];
+    const assessors = [...new Set(items.map(r => r.assessed_by).filter(Boolean))]; const approvers = [...new Set(items.map(r => r.approved_by).filter(Boolean))]; const adminSig = [...new Set(items.map(r => r.admin_signatory).filter(Boolean))].join(', '); const itMgr = [...new Set(items.map(r => r.it_manager).filter(Boolean))].join(', ');
     const bx = on => `<span class="bx">${on ? '✓' : ''}</span>`;
     return docHead('IT Asset Disposal Form ' + ref) + `<div class="sheet">
   ${hdr(co, single ? logoFor(co) : '', `Disposal Ref. No.: <b>${E(ref)}</b><br>Items: <b>${items.length}</b><br>Date generated: ${E(gen)}`)}
@@ -471,13 +477,15 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
   <div class="signs">
     <div class="sg">${sig(assessors[0])}<div class="line">${E(assessors[0] || '')}</div><div class="role">Prepared / Assessed by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtD(first.assessed_date))}</span></div></div>
     <div class="sg"><div class="line"></div><div class="role">Noted by &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg">${sig(itMgr)}<div class="line">${E(itMgr)}</div><div class="role">Co-signatory &mdash; IT Manager</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg">${sig(adminSig)}<div class="line">${E(adminSig)}</div><div class="role">Co-signatory &mdash; Administrative Department</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line">${E(approvers.join(', '))}</div><div class="role">Approved by &mdash; Management</div><div class="dt">Date:<span>${E(fmtD(first.approved_date))}</span></div></div>
     <div class="sg"><div class="line">${E(recips)}</div><div class="role">Received by &mdash; Recycler / Buyer / Donee (signature over printed name)</div><div class="dt">Date:<span>${E(dates)}</span></div></div>
   </div>
 
   <h2>5. Certificate of Disposal</h2>
   <div class="cert">This certifies that the IT asset(s) enumerated in Section 1 under Disposal Ref. No. <b>${E(ref)}</b> were disposed of on <b>${E(dates) || '____________'}</b> by <b>${E(methods) || '____________________'}</b>${recips ? ' through <b>' + E(recips) + '</b>' : ''}, that all company data contained therein has been securely erased or destroyed, and that the asset(s) have been removed from the company's records.<br><br>
-    Certified by: ______________________________ &nbsp; IT Department &nbsp;&nbsp;&nbsp; Witnessed by: ______________________________ &nbsp; Date: ______________</div>
+    Certified by: <u style="text-decoration:none;border-bottom:1px solid #111;padding:0 8px;display:inline-block;min-width:200px">${E(itMgr)}</u> &nbsp; IT Manager &nbsp;&nbsp;&nbsp; Co-signed by: <u style="text-decoration:none;border-bottom:1px solid #111;padding:0 8px;display:inline-block;min-width:200px">${E(adminSig)}</u> &nbsp; Administrative Department &nbsp;&nbsp;&nbsp; Date: ______________</div>
   <div class="foot"><span>${E(co)} &middot; IT Asset Disposal Form</span><span>${E(ref)} &middot; Generated ${E(gen)}</span></div>
 </div>` + docTail;
   }
