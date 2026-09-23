@@ -10,7 +10,7 @@
 
   /* ===================== constants ===================== */
   const STATUSES = ['For evaluation','For disposal','Approved','Disposed','Cancelled'];
-  const METHODS = ['Sell as scrap','E-waste recycler (certified)','Donate','Return to vendor / trade-in','Physical destruction','Cannibalize for parts','Other'];
+  const METHODS = ['Sell as scrap','E-waste recycler (certified)','Donate','Return to vendor / trade-in','Physical destruction','Cannibalize for parts','Sold to employee (buyout)','Other'];
   const ASSET_TYPES = (typeof ASSETS !== 'undefined') ? ASSETS : ['Laptop/Desktop','Monitor','Keyboard','Mouse','Laptop Charger/Adapter','Docking Station','Headset','Mobile Device/Tablet','External HDD/SSD/USB','Other IT Equipment'];
   const E = (typeof esc === 'function') ? esc : (s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])));
   const fmtD = d => { if (!d) return ''; const x = new Date(d.length === 10 ? d + 'T00:00:00' : d); return isNaN(x) ? String(d) : x.toLocaleDateString([], { year:'numeric', month:'short', day:'2-digit' }); };
@@ -100,8 +100,8 @@
   async function save(rec){
     const isNew = !rec.id;
     const row = { ...rec, updated_by: currentUser?.id || null, updated_at: new Date().toISOString() };
-    ['qty','acquisition_cost','disposal_value'].forEach(k => { if (row[k] === '' || row[k] === undefined || row[k] === null || isNaN(Number(row[k]))) row[k] = k === 'qty' ? 1 : null; else row[k] = Number(row[k]); });
-    ['assessed_date','acquisition_date','disposal_date','approved_date'].forEach(k => { if (!row[k]) row[k] = null; });
+    ['qty','acquisition_cost','disposal_value','buyout_amount'].forEach(k => { if (row[k] === '' || row[k] === undefined || row[k] === null || isNaN(Number(row[k]))) row[k] = k === 'qty' ? 1 : null; else row[k] = Number(row[k]); });
+    ['assessed_date','acquisition_date','disposal_date','approved_date','buyout_date'].forEach(k => { if (!row[k]) row[k] = null; });
     if (isNew) { delete row.id; row.created_by = currentUser?.id || null; if (!row.ref_no) row.ref_no = nextRef(row.company); }
     const { data, error } = await sb.from('itat_disposals').upsert(row).select().single();
     if (error) throw new Error(error.message);
@@ -126,7 +126,7 @@
     <div class="kpis" id="dspKpis"></div>
     <div class="bar">
       <input id="dspQ" type="search" placeholder="Search ref, tag, serial, model, user…" autocomplete="off">
-      <select id="dspStatus"><option value="">All statuses</option><option value="open">Open (not yet disposed)</option>${STATUSES.map(s => `<option>${s}</option>`).join('')}</select>
+      <select id="dspStatus"><option value="">All statuses</option><option value="open">Open (not yet disposed)</option><option value="buyout">Paid under buyout</option>${STATUSES.map(s => `<option>${s}</option>`).join('')}</select>
       <select id="dspCompany"><option value="">All companies</option></select>
       <span class="sp"></span>
       <button class="btn" id="dspForm" title="Generate the IT Asset Disposal Form / Certificate of Disposal for the ticked items">Disposal Form (selected)</button>
@@ -145,7 +145,7 @@
   function filtered(){
     const q = filt.q.trim().toLowerCase();
     let list = rows.filter(r => (!filt.company || r.company === filt.company)
-      && (!filt.status || (filt.status === 'open' ? !['Disposed','Cancelled'].includes(r.status) : r.status === filt.status))
+      && (!filt.status || (filt.status === 'open' ? !['Disposed','Cancelled'].includes(r.status) : filt.status === 'buyout' ? !!r.buyout_paid : r.status === filt.status))
       && (!q || [r.ref_no, r.company, r.asset_type, r.asset_tag, r.serial_no, r.description, r.last_user, r.department, r.reason, r.turnover_ctrl_no, r.disposal_method, r.recipient, r.disposal_ref, r.remarks, r.status].join(' ').toLowerCase().includes(q)));
     list.sort((a, b) => { const x = a[sortKey] ?? '', y = b[sortKey] ?? ''; const c = x < y ? -1 : x > y ? 1 : 0; return sortAsc ? c : -c; });
     return list;
@@ -167,7 +167,7 @@
       <td class="m">${E(r.asset_tag || '')}<br><span class="small">${E(r.serial_no || '')}</span></td>
       <td>${E(r.last_user || '')}<br><span class="small">${E(r.department || '')}</span></td>
       <td>${E(r.reason || '')}${r.assessed_by ? `<br><span class="small">Assessed by ${E(r.assessed_by)}${r.assessed_date ? ' · ' + E(fmtD(r.assessed_date)) : ''}</span>` : ''}</td>
-      <td><span class="dsp-pill ${statusCls(r.status)}">${E(r.status)}</span>${r.approved_by && ['Approved','Disposed'].includes(r.status) ? `<br><span class="small">by ${E(r.approved_by)}</span>` : ''}</td>
+      <td><span class="dsp-pill ${statusCls(r.status)}">${E(r.status)}</span>${r.buyout_paid ? `<br><span class="dsp-pill done" title="Paid by the employee under Section 7 Asset Buyout${r.buyout_ref ? ' · OR/AR ' + E(r.buyout_ref) : ''}">Buyout paid</span>` : ''}${r.approved_by && ['Approved','Disposed'].includes(r.status) ? `<br><span class="small">by ${E(r.approved_by)}</span>` : ''}</td>
       <td>${r.disposal_method ? E(r.disposal_method) : '<span class="small">—</span>'}${r.disposal_date ? `<br><span class="small">${E(fmtD(r.disposal_date))}${r.recipient ? ' · ' + E(r.recipient) : ''}</span>` : ''}</td>
       <td class="small" style="white-space:nowrap">${E(fmtD(r.updated_at))}</td>
       <td><div class="acts"><button type="button" data-edit>Edit</button><button type="button" class="del" data-del>Remove</button></div></td></tr>`).join('')
@@ -262,6 +262,13 @@
           <label class="w2">Co-signatory — Administrative Department <input name="admin_signatory" placeholder="Administrative Department signatory"></label>
           <label class="w2">Co-signatory — Finance / Accounting <input name="finance_signatory" placeholder="Finance / Accounting (Fixed Assets) signatory"></label>
         </div>
+        <h3>Buyout (Section 7)</h3>
+        <div class="grid">
+          <label class="chk w4"><input type="checkbox" name="buyout_paid"> The employee already <b>paid</b> for this asset under the Asset Buyout option (Section 7 of the turnover form)</label>
+          <label>OR / AR No. <input name="buyout_ref" class="mono" placeholder="from the buyout"></label>
+          <label>Amount paid (PHP) <input name="buyout_amount" type="number" step="0.01" min="0"></label>
+          <label>Date paid <input name="buyout_date" type="date"></label>
+        </div>
         <h3>Disposal</h3>
         <div class="grid">
           <label class="w2">Disposal method <select name="disposal_method"><option value="">— not yet —</option>${METHODS.map(m => `<option>${m}</option>`).join('')}</select></label>
@@ -289,6 +296,7 @@
     em.hidden = false; F.elements.asset_type.focus();
   }
   F.elements.company.addEventListener('change', () => { if (!F.elements.id.value) F.elements.ref_no_view.value = F.elements.company.value ? nextRef(F.elements.company.value) + ' (auto)' : 'auto'; });
+  F.elements.buyout_paid.addEventListener('change', () => { if (F.elements.buyout_paid.checked) { if (!F.elements.disposal_method.value) F.elements.disposal_method.value = 'Sold to employee (buyout)'; if (!F.elements.recipient.value) F.elements.recipient.value = F.elements.last_user.value; if (!F.elements.disposal_ref.value) F.elements.disposal_ref.value = F.elements.buyout_ref.value; if (!F.elements.disposal_value.value) F.elements.disposal_value.value = F.elements.buyout_amount.value; if (!F.elements.disposal_date.value) F.elements.disposal_date.value = F.elements.buyout_date.value; } });
   F.elements.status.addEventListener('change', () => { const s = F.elements.status.value; if (s === 'Approved' && !F.elements.approved_date.value) F.elements.approved_date.value = today(); if (s === 'Disposed' && !F.elements.disposal_date.value) F.elements.disposal_date.value = today(); });
   F.addEventListener('submit', async e => {
     e.preventDefault(); const rec = {};
@@ -322,7 +330,7 @@
       </div>
       <h3>Assets</h3>
       <div class="tablewrap"><table id="mmTable">
-        <thead><tr><th>#</th><th style="min-width:150px">Asset type</th><th>Tag / ID</th><th>Serial No.</th><th style="min-width:160px">Description / Model</th><th style="width:56px">Qty</th><th>Last user</th><th>Dept.</th><th style="min-width:180px">Reason / defect</th><th><label class="chk" style="padding:0;gap:4px;font-size:11px"><input type="checkbox" id="mmWipedAll" title="Set data-wiped on all rows"> Wiped</label></th><th></th></tr></thead>
+        <thead><tr><th>#</th><th style="min-width:150px">Asset type</th><th>Tag / ID</th><th>Serial No.</th><th style="min-width:160px">Description / Model</th><th style="width:56px">Qty</th><th>Last user</th><th>Dept.</th><th style="min-width:180px">Reason / defect</th><th><label class="chk" style="padding:0;gap:4px;font-size:11px"><input type="checkbox" id="mmWipedAll" title="Set data-wiped on all rows"> Wiped</label></th><th title="Already paid by the employee under Section 7 Asset Buyout">Buyout paid / OR no.</th><th></th></tr></thead>
         <tbody id="mmRows"></tbody>
       </table></div>
       <div style="display:flex;gap:8px;align-items:center"><button type="button" class="btn" id="mmAddRow">+ Add row</button><button type="button" class="btn" id="mmAdd5">+ 5 rows</button><span class="hint" style="margin:0">Tip: press Enter in the Reason cell to jump to (or add) the next row.</span></div>
@@ -339,7 +347,7 @@
       <td><select data-k="asset_type">${'<option value=""></option>' + typeOpts}</select><input data-k="asset_type_other" placeholder="Other type" hidden style="margin-top:3px"></td>
       <td><input data-k="asset_tag" class="mono"></td><td><input data-k="serial_no" class="mono"></td><td><input data-k="description"></td>
       <td><input data-k="qty" type="number" min="1" value="1"></td><td><input data-k="last_user" placeholder="(default)"></td><td><input data-k="department" placeholder="(default)"></td>
-      <td><input data-k="reason"></td><td style="text-align:center"><input type="checkbox" data-k="data_wiped"></td><td><button type="button" class="x" title="Remove row">×</button></td>`;
+      <td><input data-k="reason"></td><td style="text-align:center"><input type="checkbox" data-k="data_wiped"></td><td style="white-space:nowrap"><input type="checkbox" data-k="buyout_paid" title="Paid under buyout"> <input data-k="buyout_ref" class="mono" placeholder="OR/AR no." style="width:90px;display:inline-block"></td><td><button type="button" class="x" title="Remove row">×</button></td>`;
     tr.querySelector('[data-k=asset_type]').onchange = e => { const o = tr.querySelector('[data-k=asset_type_other]'); o.hidden = e.target.value !== '__other'; if (!o.hidden) o.focus(); };
     tr.querySelector('button.x').onclick = () => { tr.remove(); mmRenumber(); if (!M('#mmRows').children.length) mmRow(); };
     M('#mmRows').appendChild(tr); mmRenumber(); return tr;
@@ -348,7 +356,8 @@
   function mmRowData(tr){
     const g = k => tr.querySelector(`[data-k=${k}]`);
     let type = g('asset_type').value; if (type === '__other') type = g('asset_type_other').value.trim();
-    const d = { asset_type: type, asset_tag: g('asset_tag').value.trim(), serial_no: g('serial_no').value.trim(), description: g('description').value.trim(), qty: g('qty').value || 1, last_user: g('last_user').value.trim() || M('#mmUser').value.trim(), department: g('department').value.trim() || M('#mmDept').value.trim(), reason: g('reason').value.trim(), data_wiped: g('data_wiped').checked };
+    const d = { asset_type: type, asset_tag: g('asset_tag').value.trim(), serial_no: g('serial_no').value.trim(), description: g('description').value.trim(), qty: g('qty').value || 1, last_user: g('last_user').value.trim() || M('#mmUser').value.trim(), department: g('department').value.trim() || M('#mmDept').value.trim(), reason: g('reason').value.trim(), data_wiped: g('data_wiped').checked, buyout_paid: g('buyout_paid').checked, buyout_ref: g('buyout_ref').value.trim() };
+    if (d.buyout_paid) { d.disposal_method = 'Sold to employee (buyout)'; d.disposal_ref = d.buyout_ref; d.recipient = d.last_user; }
     d._empty = !type && !d.asset_tag && !d.serial_no && !d.description && !d.reason;
     return d;
   }
@@ -411,9 +420,10 @@
         const tag = rec[`a${i}_tag`] || '', sn = rec[`a${i}_sn`] || '', desc = rec[`a${i}_desc`] || '', rem = rec[`a${i}_rem`] || '';
         if (!tag && !sn && !desc) return;
         const dmg = !!rec[`a${i}_dmg`]; const remHit = /irrepar|beyond repair|for disposal|dispos|unrepair|condemn/i.test(rem);
-        if (!dmg && !forDsp && !remHit) return;
+        const boOn = rec.bo_enabled === true || rec.bo_enabled === 'true' || rec.bo_enabled === 'on' || rec.bo_enabled === 1; const bo = boOn && !!rec[`bo_item${i}`]; const boPaid = bo && rec.bo_pay_status === 'Fully paid';
+        if (!dmg && !forDsp && !remHit && !bo) return;
         if (rows.some(r => r.turnover_id === rec._id && r.asset_type === t)) return; // already listed
-        out.push({ turnover_id: rec._id, turnover_ctrl_no: rec.ctrl_no || '', company: co, asset_type: t, asset_tag: tag, serial_no: sn, description: desc, last_user: rec.emp_name || '', department: rec.emp_dept || '', reason: [dmg ? 'Marked damaged at turnover' : '', rem].filter(Boolean).join(' — '), assessed_by: rec.sg2_name || '', assessed_date: rec.emp_date || today(), status: 'For evaluation', qty: 1, why: [dmg ? 'Damaged' : '', forDsp ? 'Status: For Disposal' : '', remHit ? 'Remark' : ''].filter(Boolean).join(', '), pre: dmg && (forDsp || remHit) || remHit, emp: rec.emp_name || '' });
+        out.push({ turnover_id: rec._id, turnover_ctrl_no: rec.ctrl_no || '', company: co, asset_type: t, asset_tag: tag, serial_no: sn, description: desc, last_user: rec.emp_name || '', department: rec.emp_dept || '', reason: [dmg ? 'Marked damaged at turnover' : '', rem].filter(Boolean).join(' — '), assessed_by: rec.sg2_name || '', assessed_date: rec.emp_date || today(), status: 'For evaluation', qty: 1, buyout_paid: boPaid, buyout_ref: bo ? (rec.bo_or_no || '') : '', buyout_amount: bo ? (rec.bo_amount_paid || rec.bo_amount || null) : null, buyout_date: bo ? (rec.bo_paid_date || rec.bo_date || null) : null, ...(boPaid ? { disposal_method: 'Sold to employee (buyout)', disposal_ref: rec.bo_or_no || '', disposal_value: rec.bo_amount_paid || rec.bo_amount || null, disposal_date: rec.bo_paid_date || rec.bo_date || null, recipient: rec.emp_name || '' } : {}), why: [dmg ? 'Damaged' : '', forDsp ? 'Status: For Disposal' : '', remHit ? 'Remark' : '', bo ? (boPaid ? 'Buyout: PAID' : 'Buyout: ' + (rec.bo_pay_status || 'unpaid')) : ''].filter(Boolean).join(', '), pre: dmg && (forDsp || remHit) || remHit, emp: rec.emp_name || '' });
       });
     }
     return out;
@@ -455,9 +465,9 @@
 
   /* ===================== CSV ===================== */
   function exportCsv(){
-    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','it_manager','admin_signatory','finance_signatory','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','remarks','created_at','updated_at'];
+    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','it_manager','admin_signatory','finance_signatory','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','buyout_paid','buyout_ref','buyout_amount','buyout_date','remarks','created_at','updated_at'];
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const text = [cols.join(','), ...filtered().map(r => cols.map(c => q(c === 'data_wiped' ? (r[c] ? 'Yes' : 'No') : r[c])).join(','))].join('\r\n');
+    const text = [cols.join(','), ...filtered().map(r => cols.map(c => q((c === 'data_wiped' || c === 'buyout_paid') ? (r[c] ? 'Yes' : 'No') : r[c])).join(','))].join('\r\n');
     if (typeof download === 'function') download('it-asset-disposal-' + today() + '.csv', '\ufeff' + text, 'text/csv');
   }
 
@@ -494,7 +504,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
   function buildListDoc(items){
     const co = coOf(items), gen = fmtD(today());
     const rowsHtml = items.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}</td><td>${E(r.company || '')}</td><td>${E(r.asset_type || '')}${r.qty > 1 ? ' ×' + r.qty : ''}<br><span style="color:#444">${E(r.description || '')}</span></td><td class="m">${E(r.asset_tag || '')}<br>${E(r.serial_no || '')}</td><td>${E(r.last_user || '')}<br><span style="color:#444">${E(r.department || '')}</span></td><td>${E(r.reason || '')}</td><td>${E(r.assessed_by || '')}<br>${E(fmtD(r.assessed_date))}</td><td class="c">${E(r.status || '')}</td><td>${E(r.disposal_method || '')}${r.disposal_date ? '<br>' + E(fmtD(r.disposal_date)) : ''}${r.recipient ? '<br>' + E(r.recipient) : ''}</td></tr>`).join('');
-    const filterTxt = [filt.status ? 'Status: ' + (filt.status === 'open' ? 'Open' : filt.status) : '', filt.company ? 'Company: ' + filt.company : '', filt.q ? 'Search: "' + filt.q + '"' : ''].filter(Boolean).join(' · ');
+    const filterTxt = [filt.status ? 'Status: ' + (filt.status === 'open' ? 'Open' : filt.status === 'buyout' ? 'Paid under buyout' : filt.status) : '', filt.company ? 'Company: ' + filt.company : '', filt.q ? 'Search: "' + filt.q + '"' : ''].filter(Boolean).join(' · ');
     return docHead('Irreparable IT Assets for Disposal — List', '@page{size:A4 landscape}') + `<div class="land"><div class="sheet">
   ${hdr(co, items.length && [...new Set(items.map(r => r.company))].length === 1 ? logoFor(co) : '', `Date generated: ${E(gen)}<br>Items: <b>${items.length}</b>${filterTxt ? '<br>' + E(filterTxt) : ''}`)}
   <h1>IRREPARABLE IT ASSETS SUBJECT FOR DISPOSAL</h1>
@@ -517,7 +527,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
     const ref = items.length === 1 ? (first.ref_no || '') : `${single ? abbrOf(co) : 'ITAT'}-DSP-BATCH-${today().replace(/-/g, '')}`;
     const allDisposed = items.length && items.every(r => r.status === 'Disposed'), allApproved = items.length && items.every(r => ['Approved','Disposed'].includes(r.status));
     const total = items.reduce((s, r) => s + (Number(r.acquisition_cost) || 0), 0), proceeds = items.reduce((s, r) => s + (Number(r.disposal_value) || 0), 0);
-    const rowsHtml = items.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}</td><td>${E(r.asset_type || '')}${r.qty > 1 ? ' ×' + r.qty : ''}<br><span style="color:#444">${E(r.description || '')}</span></td><td class="m">${E(r.asset_tag || '')}<br>${E(r.serial_no || '')}</td><td>${E(r.last_user || '')}<br><span style="color:#444">${E(r.department || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</span></td><td>${E(r.reason || '')}</td><td>${E(fmtD(r.acquisition_date))}</td><td class="r">${E(money(r.acquisition_cost))}</td><td class="c">${r.data_wiped ? '☑' : '☐'}</td></tr>`).join('')
+    const rowsHtml = items.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}</td><td>${E(r.asset_type || '')}${r.qty > 1 ? ' ×' + r.qty : ''}<br><span style="color:#444">${E(r.description || '')}</span></td><td class="m">${E(r.asset_tag || '')}<br>${E(r.serial_no || '')}</td><td>${E(r.last_user || '')}<br><span style="color:#444">${E(r.department || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</span></td><td>${E(r.reason || '')}</td><td>${E(fmtD(r.acquisition_date))}</td><td class="r">${E(money(r.acquisition_cost))}</td><td class="c">${r.data_wiped ? '☑' : '☐'}</td></tr>${r.buyout_paid ? `<tr><td></td><td colspan="8" style="border-top:0;color:#2A7A4B;font-size:9.5px"><b>PAID UNDER BUYOUT</b> — sold to ${E(r.last_user || 'the employee')}${r.buyout_ref ? ' · OR/AR No. ' + E(r.buyout_ref) : ''}${r.buyout_amount ? ' · PHP ' + E(money(r.buyout_amount)) : ''}${r.buyout_date ? ' · ' + E(fmtD(r.buyout_date)) : ''} (see Asset Buyout Form${r.turnover_ctrl_no ? ' ' + E(r.turnover_ctrl_no) + '-BO' : ''})</td></tr>` : ''}`).join('')
       + Array.from({ length: Math.max(0, 3 - items.length) }, () => '<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
     const methods = [...new Set(items.map(r => r.disposal_method).filter(Boolean))].join(', ');
     const recips = [...new Set(items.map(r => r.recipient).filter(Boolean))].join(', ');
@@ -550,7 +560,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
     <div class="f"><span class="lbl">Proceeds (PHP)</span><div class="val">${E(proceeds ? money(proceeds) : '')}</div></div>
     <div class="f w2"><span class="lbl">Recipient (recycler / buyer / donee)</span><div class="val">${E(recips)}</div></div>
     <div class="f w2"><span class="lbl">Reference (certificate / OR / gate pass no.)</span><div class="val" style="font-family:Consolas,monospace">${E(refs)}</div></div>
-    <div class="f w4" style="grid-column:span 4"><span class="lbl">Remarks</span><div class="val">${E([...new Set(items.map(r => r.remarks).filter(Boolean))].join('; '))}</div></div>
+    ${items.some(r => r.buyout_paid) ? `<div class="f w4" style="grid-column:span 4"><span class="lbl">Paid under Asset Buyout (Section 7)</span><div class="val">${E(items.filter(r => r.buyout_paid).map(r => (r.ref_no || '') + ' — ' + (r.last_user || 'employee') + (r.buyout_ref ? ' · OR/AR ' + r.buyout_ref : '') + (r.buyout_amount ? ' · PHP ' + money(r.buyout_amount) : '')).join('; '))}</div></div>` : ''}<div class="f w4" style="grid-column:span 4"><span class="lbl">Remarks</span><div class="val">${E([...new Set(items.map(r => r.remarks).filter(Boolean))].join('; '))}</div></div>
   </div>
   <div class="cert" style="margin-top:8px"><b>Pre-disposal checklist:</b>
     <label>${bx(items.every(r => r.data_wiped))} All storage media wiped or physically destroyed</label>
