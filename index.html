@@ -497,7 +497,7 @@ function refresh(){ form.querySelectorAll('.ck').forEach(l=>{ const c=l.querySel
 function reasonOf(o){ const r=[]; if(o.r_resign) r.push('Resignation'); if(o.r_term) r.push('Termination'); if(o.r_transfer) r.push('Transfer'); if(o.r_reassign) r.push('Reassignment'); if(o.r_replace) r.push('Replacement'); if(o.r_other) r.push('Other'+(o.r_other_txt?': '+o.r_other_txt:'')); return r.join(', '); }
 function assetsOf(o){ return ASSETS.map((a,i)=>({type:a,tag:o[`a${i}_tag`]||'',sn:o[`a${i}_sn`]||'',desc:o[`a${i}_desc`]||''})).filter(x=>x.tag||x.sn||x.desc); }
 function isComplete(o){ return !!(o.sg1_name && o.sg2_name); }
-function buyoutOf(o){ const on=o.bo_enabled===true||o.bo_enabled==='true'||o.bo_enabled==='on'||o.bo_enabled===1; if(!on) return ''; return String(o.bo_or_no||'').trim()?'paid':'ongoing'; }
+function buyoutOf(o){ const on=o.bo_enabled===true||o.bo_enabled==='true'||o.bo_enabled==='on'||o.bo_enabled===1; if(!on) return ''; const st=o.bo_pay_status||''; if(st==='Fully paid') return 'paid'; if(st) return 'ongoing'; const amt=parseFloat(o.bo_amount)||0, paid=parseFloat(o.bo_amount_paid)||0; if(amt>0&&paid>=amt) return 'paid'; return String(o.bo_or_no||'').trim()?'paid':'ongoing'; }
 function buyoutPill(o){ const b=buyoutOf(o); return b?`<span class="status-pill ${b==='paid'?'buyout-paid':'buyout'}" title="${b==='paid'?'Asset buyout – OR/AR no. recorded':'Asset buyout in progress – no OR/AR no. yet'}">${b==='paid'?'Buyout · paid':'Buyout · ongoing'}</span>`:''; }
 function buyoutMatch(o,f){ const b=buyoutOf(o); return !f || (f==='any'?!!b : f==='none'?!b : b===f); }
 
