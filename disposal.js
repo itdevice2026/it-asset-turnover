@@ -260,6 +260,7 @@
           <label>Approval date <input name="approved_date" type="date"></label>
           <label class="w2">Co-signatory — IT Manager <input name="it_manager" placeholder="IT Manager's name"></label>
           <label class="w2">Co-signatory — Administrative Department <input name="admin_signatory" placeholder="Administrative Department signatory"></label>
+          <label class="w2">Co-signatory — Finance / Accounting <input name="finance_signatory" placeholder="Finance / Accounting (Fixed Assets) signatory"></label>
         </div>
         <h3>Disposal</h3>
         <div class="grid">
@@ -280,7 +281,7 @@
   function openEdit(rec, presets){
     fillCompanies(); F.reset(); dmMsg('');
     const last = k => (rows.find(x => x[k]) || {})[k] || ''; // reuse the co-signatories from the most recent item
-    const r = rec || { status: 'For evaluation', qty: 1, assessed_date: today(), it_manager: last('it_manager'), admin_signatory: last('admin_signatory'), assessed_by: (typeof currentUser !== 'undefined' && currentUser) ? (currentUser.user_metadata?.full_name || '') : '', company: (typeof companyName === 'function' && typeof collect === 'function') ? companyName(collect()) : '', ...(presets || {}) };
+    const r = rec || { status: 'For evaluation', qty: 1, assessed_date: today(), it_manager: last('it_manager'), admin_signatory: last('admin_signatory'), finance_signatory: last('finance_signatory'), assessed_by: (typeof currentUser !== 'undefined' && currentUser) ? (currentUser.user_metadata?.full_name || '') : '', company: (typeof companyName === 'function' && typeof collect === 'function') ? companyName(collect()) : '', ...(presets || {}) };
     for (const el of F.elements) { if (!el.name || el.name === 'ref_no_view') continue; if (el.type === 'checkbox') el.checked = !!r[el.name]; else el.value = r[el.name] ?? ''; }
     if (r.company && !F.elements.company.value) { F.elements.company.insertAdjacentHTML('beforeend', `<option>${E(r.company)}</option>`); F.elements.company.value = r.company; }
     F.elements.ref_no_view.value = r.ref_no || (r.company ? nextRef(r.company) + ' (auto)' : 'auto');
@@ -315,6 +316,7 @@
         <label class="w2">Assessed by (IT) <input id="mmAssessed"></label>
         <label>Co-signatory — IT Manager <input id="mmItMgr"></label>
         <label>Co-signatory — Admin. Dept. <input id="mmAdmin"></label>
+        <label class="w2">Co-signatory — Finance / Accounting <input id="mmFinance"></label>
         <label class="w2">Last user / custodian (default for all rows) <input id="mmUser"></label>
         <label class="w2">Department (default for all rows) <input id="mmDept"></label>
       </div>
@@ -359,6 +361,7 @@
     if (!M('#mmAssessed').value) M('#mmAssessed').value = last('assessed_by');
     if (!M('#mmItMgr').value) M('#mmItMgr').value = last('it_manager');
     if (!M('#mmAdmin').value) M('#mmAdmin').value = last('admin_signatory');
+    if (!M('#mmFinance').value) M('#mmFinance').value = last('finance_signatory');
     M('#mmRows').innerHTML = ''; for (let i = 0; i < 5; i++) mmRow();
     M('#mmMsg').textContent = ''; M('#mmMsg').classList.remove('err'); mm.hidden = false;
     M('#mmRows').querySelector('select').focus();
@@ -376,7 +379,7 @@
     trs.forEach(tr => { const d = mmRowData(tr); tr.classList.remove('bad'); if (d._empty) return; if (!d.asset_type) { tr.classList.add('bad'); bad++; return; } delete d._empty; items.push(d); });
     if (bad) { msg(`${bad} row(s) have details but no asset type (highlighted).`, true); return; }
     if (!items.length) { msg('Fill in at least one asset row.', true); return; }
-    const common = { company, status: M('#mmStatus').value, assessed_date: M('#mmDate').value, assessed_by: M('#mmAssessed').value.trim(), it_manager: M('#mmItMgr').value.trim(), admin_signatory: M('#mmAdmin').value.trim() };
+    const common = { company, status: M('#mmStatus').value, assessed_date: M('#mmDate').value, assessed_by: M('#mmAssessed').value.trim(), it_manager: M('#mmItMgr').value.trim(), admin_signatory: M('#mmAdmin').value.trim(), finance_signatory: M('#mmFinance').value.trim() };
     if (common.status === 'Approved') common.approved_date = today();
     const btn = M('#mmSave'); btn.disabled = true; let n = 0;
     try {
@@ -429,7 +432,7 @@
     if (!picked.length) { pm.querySelector('#pmMsg').textContent = 'Tick at least one asset.'; return; }
     const btn = pm.querySelector('#pmAdd'); btn.disabled = true; btn.textContent = 'Adding…';
     const last = k => (rows.find(x => x[k]) || {})[k] || ''; // reuse the co-signatories from the most recent item
-    try { for (const c of picked) { const { why, pre, emp, ...rec } = c; rec.it_manager = last('it_manager'); rec.admin_signatory = last('admin_signatory'); await save(rec); } pm.hidden = true; flash(`${picked.length} asset(s) added to the disposal list.`); if (view.hidden) showView('disposal'); }
+    try { for (const c of picked) { const { why, pre, emp, ...rec } = c; rec.it_manager = last('it_manager'); rec.admin_signatory = last('admin_signatory'); rec.finance_signatory = last('finance_signatory'); await save(rec); } pm.hidden = true; flash(`${picked.length} asset(s) added to the disposal list.`); if (view.hidden) showView('disposal'); }
     catch (e) { pm.querySelector('#pmMsg').textContent = e.message; pm.querySelector('#pmMsg').classList.add('err'); }
     btn.disabled = false; btn.textContent = 'Add selected to disposal list';
   };
@@ -452,7 +455,7 @@
 
   /* ===================== CSV ===================== */
   function exportCsv(){
-    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','it_manager','admin_signatory','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','remarks','created_at','updated_at'];
+    const cols = ['ref_no','status','company','asset_type','qty','asset_tag','serial_no','description','last_user','department','turnover_ctrl_no','reason','assessed_by','assessed_date','data_wiped','acquisition_date','acquisition_cost','approved_by','approved_date','it_manager','admin_signatory','finance_signatory','disposal_method','disposal_date','disposal_value','recipient','disposal_ref','remarks','created_at','updated_at'];
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const text = [cols.join(','), ...filtered().map(r => cols.map(c => q(c === 'data_wiped' ? (r[c] ? 'Yes' : 'No') : r[c])).join(','))].join('\r\n');
     if (typeof download === 'function') download('it-asset-disposal-' + today() + '.csv', '\ufeff' + text, 'text/csv');
@@ -501,7 +504,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
     <div class="sg"><div class="line"></div><div class="role">Prepared by &mdash; IT Department</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line">${E([...new Set(items.map(r => r.it_manager).filter(Boolean))].join(', '))}</div><div class="role">Co-signatory &mdash; IT Manager</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line">${E([...new Set(items.map(r => r.admin_signatory).filter(Boolean))].join(', '))}</div><div class="role">Co-signatory &mdash; Administrative Department</div><div class="dt">Date:<span></span></div></div>
-    <div class="sg"><div class="line"></div><div class="role">Noted by &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg"><div class="line">${E([...new Set(items.map(r => r.finance_signatory).filter(Boolean))].join(', '))}</div><div class="role">Co-signatory &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
   </div>
   <div class="foot"><span>${E(co)} &middot; Irreparable IT Assets for Disposal</span><span>Generated ${E(gen)}</span></div>
 </div></div>` + docTail;
@@ -520,7 +523,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
     const recips = [...new Set(items.map(r => r.recipient).filter(Boolean))].join(', ');
     const refs = [...new Set(items.map(r => r.disposal_ref).filter(Boolean))].join(', ');
     const dates = [...new Set(items.map(r => r.disposal_date).filter(Boolean))].map(fmtD).join(', ');
-    const assessors = [...new Set(items.map(r => r.assessed_by).filter(Boolean))]; const approvers = [...new Set(items.map(r => r.approved_by).filter(Boolean))]; const adminSig = [...new Set(items.map(r => r.admin_signatory).filter(Boolean))].join(', '); const itMgr = [...new Set(items.map(r => r.it_manager).filter(Boolean))].join(', ');
+    const assessors = [...new Set(items.map(r => r.assessed_by).filter(Boolean))]; const approvers = [...new Set(items.map(r => r.approved_by).filter(Boolean))]; const adminSig = [...new Set(items.map(r => r.admin_signatory).filter(Boolean))].join(', '); const itMgr = [...new Set(items.map(r => r.it_manager).filter(Boolean))].join(', '); const finSig = [...new Set(items.map(r => r.finance_signatory).filter(Boolean))].join(', ');
     const bx = on => `<span class="bx">${on ? '✓' : ''}</span>`;
     return docHead('IT Asset Disposal Form ' + ref) + `<div class="sheet">
   ${hdr(co, single ? logoFor(co) : '', `Disposal Ref. No.: <b>${E(ref)}</b><br>Items: <b>${items.length}</b><br>Date generated: ${E(gen)}`)}
@@ -565,7 +568,7 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
   </ol>
   <div class="signs">
     <div class="sg">${sig(assessors[0])}<div class="line">${E(assessors[0] || '')}</div><div class="role">Prepared / Assessed by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtD(first.assessed_date))}</span></div></div>
-    <div class="sg"><div class="line"></div><div class="role">Noted by &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg">${sig(finSig)}<div class="line">${E(finSig)}</div><div class="role">Co-signatory &mdash; Finance / Accounting (Fixed Assets)</div><div class="dt">Date:<span></span></div></div>
     <div class="sg">${sig(itMgr)}<div class="line">${E(itMgr)}</div><div class="role">Co-signatory &mdash; IT Manager</div><div class="dt">Date:<span></span></div></div>
     <div class="sg">${sig(adminSig)}<div class="line">${E(adminSig)}</div><div class="role">Co-signatory &mdash; Administrative Department</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line">${E(approvers.join(', '))}</div><div class="role">Approved by &mdash; Management</div><div class="dt">Date:<span>${E(fmtD(first.approved_date))}</span></div></div>
