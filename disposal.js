@@ -121,7 +121,7 @@
     <div class="head">
       <div><h2 class="title">Irreparable IT Assets — For Disposal</h2>
         <div class="sub">Register of IT equipment assessed as beyond economical repair and subject for disposal. Workflow: For evaluation → For disposal → Approved → Disposed.</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="dspAdd">+ Add asset</button><button class="btn" id="dspPull">Pull from turnovers</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="dspAdd">+ Add asset</button><button class="btn" id="dspAddMany" title="Enter several irreparable assets at once — each row becomes its own disposal item">+ Add multiple</button><button class="btn" id="dspPull">Pull from turnovers</button></div>
     </div>
     <div class="kpis" id="dspKpis"></div>
     <div class="bar">
@@ -171,7 +171,7 @@
       <td>${r.disposal_method ? E(r.disposal_method) : '<span class="small">—</span>'}${r.disposal_date ? `<br><span class="small">${E(fmtD(r.disposal_date))}${r.recipient ? ' · ' + E(r.recipient) : ''}</span>` : ''}</td>
       <td class="small" style="white-space:nowrap">${E(fmtD(r.updated_at))}</td>
       <td><div class="acts"><button type="button" data-edit>Edit</button><button type="button" class="del" data-del>Remove</button></div></td></tr>`).join('')
-      : `<tr><td colspan="11" class="empty">${rows.length ? 'No items match the current filter.' : 'No assets listed for disposal yet. Use <b>+ Add asset</b> or <b>Pull from turnovers</b>.'}</td></tr>`;
+      : `<tr><td colspan="11" class="empty">${rows.length ? 'No items match the current filter.' : 'No assets listed for disposal yet. Use <b>+ Add asset</b>, <b>+ Add multiple</b> or <b>Pull from turnovers</b>.'}</td></tr>`;
     $('#dspFoot').textContent = `${list.length} of ${rows.length} item(s)` + (selected.size ? ` · ${selected.size} selected` : '');
     $('#dspAll').checked = list.length > 0 && list.every(r => selected.has(r.id));
     $('#dspRows').querySelectorAll('[data-sel]').forEach(c => c.onchange = () => { const id = c.closest('tr').dataset.id; c.checked ? selected.add(id) : selected.delete(id); $('#dspFoot').textContent = `${list.length} of ${rows.length} item(s)` + (selected.size ? ` · ${selected.size} selected` : ''); });
@@ -188,6 +188,7 @@
   $('#dspAll').addEventListener('change', () => { const list = filtered(); list.forEach(r => $('#dspAll').checked ? selected.add(r.id) : selected.delete(r.id)); render(); });
   view.querySelectorAll('th[data-sort]').forEach(th => { th.style.cursor = 'pointer'; th.onclick = () => { const k = th.dataset.sort; if (sortKey === k) sortAsc = !sortAsc; else { sortKey = k; sortAsc = k !== 'updated_at'; } render(); }; });
   $('#dspAdd').onclick = () => openEdit(null);
+  $('#dspAddMany').onclick = () => openMulti();
   $('#dspPull').onclick = () => openPull(null);
   $('#dspCsv').onclick = exportCsv;
   $('#dspPrint').onclick = () => openDoc(buildListDoc(filtered()));
@@ -299,6 +300,94 @@
   em.querySelector('#dmClose').onclick = em.querySelector('#dmCancel').onclick = () => { em.hidden = true; };
   em.addEventListener('click', e => { if (e.target === em) em.hidden = true; });
 
+  /* ===================== add multiple assets at once ===================== */
+  const mm = document.createElement('div'); mm.className = 'dm'; mm.hidden = true;
+  const typeOpts = ASSET_TYPES.map(t => `<option>${E(t)}</option>`).join('') + '<option value="__other">Other (type below)</option>';
+  mm.innerHTML = `
+    <div class="box" role="dialog" aria-label="Add multiple assets" style="width:1180px">
+      <h2>Add multiple irreparable assets <button type="button" id="mmClose" aria-label="Close">×</button></h2>
+      <div class="sub">Fill one row per asset. The details below apply to every row; each row is saved as its own disposal item with its own Ref. No. Empty rows are ignored.</div>
+      <h3>Common details</h3>
+      <div class="grid">
+        <label class="w2">Company <select id="mmCompany" required><option value="">— select —</option></select></label>
+        <label>Status <select id="mmStatus">${STATUSES.map(s => `<option>${s}</option>`).join('')}</select></label>
+        <label>Assessment date <input id="mmDate" type="date"></label>
+        <label class="w2">Assessed by (IT) <input id="mmAssessed"></label>
+        <label>Co-signatory — IT Manager <input id="mmItMgr"></label>
+        <label>Co-signatory — Admin. Dept. <input id="mmAdmin"></label>
+        <label class="w2">Last user / custodian (default for all rows) <input id="mmUser"></label>
+        <label class="w2">Department (default for all rows) <input id="mmDept"></label>
+      </div>
+      <h3>Assets</h3>
+      <div class="tablewrap"><table id="mmTable">
+        <thead><tr><th>#</th><th style="min-width:150px">Asset type</th><th>Tag / ID</th><th>Serial No.</th><th style="min-width:160px">Description / Model</th><th style="width:56px">Qty</th><th>Last user</th><th>Dept.</th><th style="min-width:180px">Reason / defect</th><th><label class="chk" style="padding:0;gap:4px;font-size:11px"><input type="checkbox" id="mmWipedAll" title="Set data-wiped on all rows"> Wiped</label></th><th></th></tr></thead>
+        <tbody id="mmRows"></tbody>
+      </table></div>
+      <div style="display:flex;gap:8px;align-items:center"><button type="button" class="btn" id="mmAddRow">+ Add row</button><button type="button" class="btn" id="mmAdd5">+ 5 rows</button><span class="hint" style="margin:0">Tip: press Enter in the Reason cell to jump to (or add) the next row.</span></div>
+      <div class="btns"><span class="msg" id="mmMsg"></span><button type="button" class="btn" id="mmCancel">Cancel</button><button type="button" class="btn primary" id="mmSave">Save all</button></div>
+    </div>`;
+  document.body.appendChild(mm);
+  const M = s => mm.querySelector(s);
+  const mmStyle = document.createElement('style');
+  mmStyle.textContent = `.dm #mmTable td{padding:3px 3px}.dm #mmTable input,.dm #mmTable select{border:1px solid var(--line);border-radius:4px;padding:5px 6px;background:var(--paper);font-size:12.5px;width:100%;min-width:60px}.dm #mmTable input:focus,.dm #mmTable select:focus{outline:none;border-color:var(--accent)}.dm #mmTable td.n{color:var(--muted);font-family:var(--mono);font-size:11px;text-align:center}.dm #mmTable button.x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:16px}.dm #mmTable button.x:hover{color:var(--crit)}.dm #mmTable tr.bad td{background:#FBECEA}`;
+  document.head.appendChild(mmStyle);
+  function mmRow(){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="n"></td>
+      <td><select data-k="asset_type">${'<option value=""></option>' + typeOpts}</select><input data-k="asset_type_other" placeholder="Other type" hidden style="margin-top:3px"></td>
+      <td><input data-k="asset_tag" class="mono"></td><td><input data-k="serial_no" class="mono"></td><td><input data-k="description"></td>
+      <td><input data-k="qty" type="number" min="1" value="1"></td><td><input data-k="last_user" placeholder="(default)"></td><td><input data-k="department" placeholder="(default)"></td>
+      <td><input data-k="reason"></td><td style="text-align:center"><input type="checkbox" data-k="data_wiped"></td><td><button type="button" class="x" title="Remove row">×</button></td>`;
+    tr.querySelector('[data-k=asset_type]').onchange = e => { const o = tr.querySelector('[data-k=asset_type_other]'); o.hidden = e.target.value !== '__other'; if (!o.hidden) o.focus(); };
+    tr.querySelector('button.x').onclick = () => { tr.remove(); mmRenumber(); if (!M('#mmRows').children.length) mmRow(); };
+    M('#mmRows').appendChild(tr); mmRenumber(); return tr;
+  }
+  function mmRenumber(){ [...M('#mmRows').children].forEach((tr, i) => tr.querySelector('td.n').textContent = i + 1); }
+  function mmRowData(tr){
+    const g = k => tr.querySelector(`[data-k=${k}]`);
+    let type = g('asset_type').value; if (type === '__other') type = g('asset_type_other').value.trim();
+    const d = { asset_type: type, asset_tag: g('asset_tag').value.trim(), serial_no: g('serial_no').value.trim(), description: g('description').value.trim(), qty: g('qty').value || 1, last_user: g('last_user').value.trim() || M('#mmUser').value.trim(), department: g('department').value.trim() || M('#mmDept').value.trim(), reason: g('reason').value.trim(), data_wiped: g('data_wiped').checked };
+    d._empty = !type && !d.asset_tag && !d.serial_no && !d.description && !d.reason;
+    return d;
+  }
+  function openMulti(){
+    const sel = M('#mmCompany'); const cur = sel.value;
+    sel.innerHTML = '<option value="">— select —</option>' + companies().map(c => `<option>${E(c.name)}</option>`).join('') + [...new Set(rows.map(r => r.company).filter(n => n && !companies().some(c => c.name === n)))].map(n => `<option>${E(n)}</option>`).join('');
+    sel.value = cur || ((typeof companyName === 'function' && typeof collect === 'function') ? companyName(collect()) : '') || '';
+    const last = k => (rows.find(x => x[k]) || {})[k] || '';
+    M('#mmStatus').value = 'For evaluation'; M('#mmDate').value = today();
+    if (!M('#mmAssessed').value) M('#mmAssessed').value = last('assessed_by');
+    if (!M('#mmItMgr').value) M('#mmItMgr').value = last('it_manager');
+    if (!M('#mmAdmin').value) M('#mmAdmin').value = last('admin_signatory');
+    M('#mmRows').innerHTML = ''; for (let i = 0; i < 5; i++) mmRow();
+    M('#mmMsg').textContent = ''; M('#mmMsg').classList.remove('err'); mm.hidden = false;
+    M('#mmRows').querySelector('select').focus();
+  }
+  M('#mmAddRow').onclick = () => mmRow().querySelector('select').focus();
+  M('#mmAdd5').onclick = () => { for (let i = 0; i < 5; i++) mmRow(); };
+  M('#mmWipedAll').onchange = e => M('#mmRows').querySelectorAll('[data-k=data_wiped]').forEach(c => c.checked = e.target.checked);
+  M('#mmRows').addEventListener('keydown', e => { // Enter in the last cell adds a new row
+    if (e.key === 'Enter' && e.target.dataset.k === 'reason') { e.preventDefault(); const tr = e.target.closest('tr'); const next = tr.nextElementSibling || mmRow(); next.querySelector('select').focus(); }
+  });
+  M('#mmSave').onclick = async () => {
+    const company = M('#mmCompany').value; const msg = (t, err) => { M('#mmMsg').textContent = t || ''; M('#mmMsg').classList.toggle('err', !!err); };
+    if (!company) { msg('Select the company first.', true); M('#mmCompany').focus(); return; }
+    const trs = [...M('#mmRows').children]; const items = []; let bad = 0;
+    trs.forEach(tr => { const d = mmRowData(tr); tr.classList.remove('bad'); if (d._empty) return; if (!d.asset_type) { tr.classList.add('bad'); bad++; return; } delete d._empty; items.push(d); });
+    if (bad) { msg(`${bad} row(s) have details but no asset type (highlighted).`, true); return; }
+    if (!items.length) { msg('Fill in at least one asset row.', true); return; }
+    const common = { company, status: M('#mmStatus').value, assessed_date: M('#mmDate').value, assessed_by: M('#mmAssessed').value.trim(), it_manager: M('#mmItMgr').value.trim(), admin_signatory: M('#mmAdmin').value.trim() };
+    if (common.status === 'Approved') common.approved_date = today();
+    const btn = M('#mmSave'); btn.disabled = true; let n = 0;
+    try {
+      for (const it of items) { btn.textContent = `Saving ${n + 1} of ${items.length}…`; await save({ ...common, ...it }); n++; }
+      mm.hidden = true; flash(`${n} asset(s) added to the disposal list.`); if (view.hidden) showView('disposal');
+    } catch (e) { msg(`Saved ${n} of ${items.length}; stopped at row ${n + 1}: ${e.message}`, true); [...M('#mmRows').children].filter(tr => !mmRowData(tr)._empty).slice(0, n).forEach(tr => tr.remove()); mmRenumber(); }
+    btn.disabled = false; btn.textContent = 'Save all';
+  };
+  M('#mmClose').onclick = M('#mmCancel').onclick = () => { mm.hidden = true; };
+  mm.addEventListener('click', e => { if (e.target === mm) mm.hidden = true; });
+
   /* ===================== pull from turnover records ===================== */
   const pm = document.createElement('div'); pm.className = 'dm'; pm.hidden = true;
   pm.innerHTML = `
@@ -346,7 +435,7 @@
   };
   pm.querySelector('#pmClose').onclick = pm.querySelector('#pmCancel').onclick = () => { pm.hidden = true; };
   pm.addEventListener('click', e => { if (e.target === pm) pm.hidden = true; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { em.hidden = true; pm.hidden = true; statusMenu.hidden = true; } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { em.hidden = true; pm.hidden = true; mm.hidden = true; statusMenu.hidden = true; } });
 
   // Section 6 helper button: add this record's damaged items to the disposal list
   const statusBox = document.querySelector('[name=s_disposal]')?.closest('.status');
@@ -496,6 +585,6 @@ ol,ul{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}li{margin-
   const origStart = start;
   start = async function (session) { await origStart(session); if (!currentUser) return; tab.hidden = false; try { await load(); subscribe(); } catch (e) { flash('Disposal list: ' + e.message); } };
   const origStop = stop;
-  stop = function () { origStop(); tab.hidden = true; view.hidden = true; em.hidden = true; pm.hidden = true; rows = []; selected.clear(); if (channel) { sb.removeChannel(channel); channel = null; } };
+  stop = function () { origStop(); tab.hidden = true; view.hidden = true; em.hidden = true; pm.hidden = true; mm.hidden = true; rows = []; selected.clear(); if (channel) { sb.removeChannel(channel); channel = null; } };
   if (typeof currentUser !== 'undefined' && currentUser) { tab.hidden = false; load().then(subscribe).catch(() => {}); }
 })();
