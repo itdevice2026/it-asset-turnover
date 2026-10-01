@@ -125,6 +125,162 @@
   }
   window.itatSignatureFor = name => (find(name) || {}).data_url || ''; // used by the generated Buyout Form
 
+  /* ---------- "Turned over by" (employee) signature — optional, per record ----------
+     Stored in hidden field sg1_sig (PNG data URL) so it saves with the record via collect()/fill().
+     Added only when IT chooses to: draw on screen, upload a photo/scan, or pick a saved library signature. */
+  const css1 = document.createElement('style');
+  css1.textContent = `
+  .sig1-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:-6px}
+  .sig1-acts button{border:1px dashed var(--line);background:var(--paper);border-radius:4px;padding:3px 9px;cursor:pointer;font-size:11.5px;color:var(--muted)}
+  .sig1-acts button:hover{border-color:var(--accent);color:var(--accent)}
+  .s1 .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line)}
+  .s1 .tabs button{border:0;background:none;padding:7px 12px;cursor:pointer;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .s1 .tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .s1 .pane{display:grid;gap:10px} .s1 .pane[hidden]{display:none}
+  .s1 canvas{width:100%;height:200px;background:#fff;border:1px dashed var(--line);border-radius:6px;touch-action:none;cursor:crosshair}
+  .s1 .baseline{position:relative}
+  .s1 .baseline:after{content:'';position:absolute;left:24px;right:24px;bottom:44px;border-bottom:1px solid #d6dbe0;pointer-events:none}
+  .s1 .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .s1 canvas.pen-on{border:1px solid var(--accent);box-shadow:0 0 0 3px rgba(0,102,204,.12)}
+  .s1 .pen{font-size:12px;color:var(--accent);font-weight:600}
+  .s1 .pv img{height:60px;max-width:300px;object-fit:contain;background:#fff;border:1px dashed var(--line);padding:2px 6px}
+  @media print{.sig1-acts{display:none!important}}`;
+  document.head.appendChild(css1);
+
+  let sg1Sig = null, sig1Acts = null;
+  if (sg1) {
+    const wrap1 = sg1.parentElement;
+    sg1Sig = document.createElement('input'); sg1Sig.type = 'hidden'; sg1Sig.name = 'sg1_sig'; wrap1.appendChild(sg1Sig);
+    sig1Acts = document.createElement('div'); sig1Acts.className = 'sig1-acts noprint';
+    wrap1.insertAdjacentElement('afterend', sig1Acts);
+  }
+  function setSg1Sig(url){ if (!sg1Sig) return; sg1Sig.value = url || ''; applySg1(); sg1Sig.dispatchEvent(new Event('input', { bubbles: true })); }
+  let sig1Shown = null;
+  function applySg1(){
+    if (!sg1Sig) return;
+    const url = sg1Sig.value, wrap = sg1.parentElement; wrap.classList.add('sig-wrap');
+    let img = wrap.querySelector('.sig-img');
+    if (url) { if (!img) { img = document.createElement('img'); img.className = 'sig-img'; img.alt = ''; wrap.insertBefore(img, sg1); } if (img.getAttribute('src') !== url) img.src = url; wrap.classList.add('sig-on'); }
+    else { if (img) img.remove(); wrap.classList.remove('sig-on'); }
+    const state = url ? 'on' : 'off';
+    if (sig1Shown !== state) {
+      sig1Shown = state;
+      sig1Acts.innerHTML = url ? '<button type="button" data-s1="open">✎ Change signature</button><button type="button" data-s1="del">Remove signature</button>'
+                               : '<button type="button" data-s1="open">✍ Add employee signature</button>';
+    }
+  }
+  if (sig1Acts) sig1Acts.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.s1 === 'open') openSig1();
+    if (b.dataset.s1 === 'del') {
+      if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Confirm remove'; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = 'Remove signature'; } }, 4000); return; }
+      setSg1Sig('');
+    }
+  });
+  setInterval(applySg1, 500); // fill()/newForm()/Clear form set the hidden value without events
+
+  // Modal: Draw / Upload / From library
+  const m1 = document.createElement('div'); m1.className = 'sm s1'; m1.hidden = true;
+  m1.innerHTML = `
+    <div class="box" role="dialog" aria-label="Employee signature">
+      <h2>Signature — Turned over by (Employee) <button type="button" data-x aria-label="Close">×</button></h2>
+      <div class="sub" id="s1Who"></div>
+      <div class="tabs"><button type="button" data-t="draw" class="on">Draw</button><button type="button" data-t="upload">Upload image</button><button type="button" data-t="lib">From signature library</button></div>
+      <div class="pane" data-p="draw">
+        <div class="baseline"><canvas id="s1Pad" width="1200" height="400"></canvas></div>
+        <div class="bar"><button class="btn" type="button" id="s1Clear">Clear</button><label class="chk" style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input id="s1Tp" type="checkbox" checked> <b>Laptop touchpad mode</b></label><span class="pen" id="s1PenLbl"></span></div>
+        <div class="hint">Touchpad: <b>tap once</b> inside the box to put the pen down, <b>slide your finger</b> to write, <b>tap again</b> to lift the pen (repeat for each stroke). Untick to sign by click-and-drag with a mouse. Touch screens and styluses work either way.</div>
+      </div>
+      <div class="pane" data-p="upload" hidden>
+        <div class="bar"><input id="s1File" type="file" accept="image/*"><label class="chk" style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)"><input id="s1Trans" type="checkbox" checked> Make white background transparent</label></div>
+        <div class="pv" id="s1Pv"><span class="hint">Photo or scan of the employee's signature (black ink on white paper, cropped close).</span></div>
+      </div>
+      <div class="pane" data-p="lib" hidden><div class="pv" id="s1Lib"></div></div>
+      <div class="bar" style="justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px"><span class="msg" id="s1Msg" style="margin-right:auto"></span><button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="s1Use">Apply signature</button></div>
+    </div>`;
+  document.body.appendChild(m1);
+  const q1 = s => m1.querySelector(s);
+  const msg1 = (t, err) => { const m = q1('#s1Msg'); m.textContent = t || ''; m.classList.toggle('err', !!err); };
+  let tab1 = 'draw', upl1 = '', inked = false;
+  function showTab(t){ tab1 = t; m1.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); m1.querySelectorAll('.pane').forEach(p => p.hidden = p.dataset.p !== t); msg1(''); if (t === 'lib') renderLib(); }
+  m1.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.t));
+  m1.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { m1.hidden = true; });
+  m1.addEventListener('click', e => { if (e.target === m1) m1.hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !m1.hidden) m1.hidden = true; });
+
+  // drawing pad (pointer events: mouse, pen, touch)
+  const pad = q1('#s1Pad'), pctx = pad.getContext('2d');
+  function clearPad(){ pctx.clearRect(0, 0, pad.width, pad.height); inked = false; }
+  let drawing = false, last = null;
+  const pt = e => { const r = pad.getBoundingClientRect(); return { x: (e.clientX - r.left) * pad.width / r.width, y: (e.clientY - r.top) * pad.height / r.height, p: e.pressure || 0.5 }; };
+  // Touchpad mode (default for mouse/touchpad): tap once = pen down, move finger to write, tap again = pen up — no need to hold the click.
+  // Hold-and-drag still works; touch screens and styluses draw while in contact.
+  const tpMode = () => q1('#s1Tp').checked;
+  const penState = on => { drawing = on; pad.classList.toggle('pen-on', on); q1('#s1PenLbl').textContent = on ? 'Pen DOWN — writing… tap the touchpad to lift the pen' : (tpMode() ? 'Pen up — tap the touchpad inside the box to start a stroke' : ''); };
+  let downAt = null;
+  pad.addEventListener('pointerdown', e => {
+    e.preventDefault(); const p = pt(e); downAt = { x: p.x, y: p.y, t: Date.now() };
+    if (tpMode() && e.pointerType === 'mouse' && drawing) { penState(false); downAt = null; return; } // second tap lifts the pen
+    try { pad.setPointerCapture(e.pointerId); } catch (_) {}
+    last = p; pctx.beginPath(); pctx.arc(last.x, last.y, 2.2, 0, Math.PI * 2); pctx.fillStyle = '#10233f'; pctx.fill(); inked = true; penState(true);
+  });
+  pad.addEventListener('pointermove', e => {
+    if (!drawing) return; e.preventDefault(); const p = pt(e);
+    pctx.strokeStyle = '#10233f'; pctx.lineCap = 'round'; pctx.lineJoin = 'round'; pctx.lineWidth = e.pointerType === 'pen' ? 2.5 + p.p * 4 : 4.5;
+    pctx.beginPath(); pctx.moveTo(last.x, last.y); pctx.quadraticCurveTo(last.x, last.y, (last.x + p.x) / 2, (last.y + p.y) / 2); pctx.lineTo(p.x, p.y); pctx.stroke(); last = p;
+  });
+  pad.addEventListener('pointerup', e => {
+    // In touchpad mode a quick tap (little movement) keeps the pen down so the stroke follows the finger; a real drag ends the stroke.
+    const p = pt(e), tap = downAt && Math.hypot(p.x - downAt.x, p.y - downAt.y) < 12 && Date.now() - downAt.t < 350;
+    downAt = null; try { pad.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (!(tpMode() && e.pointerType === 'mouse' && tap && drawing)) penState(false);
+  });
+  pad.addEventListener('pointercancel', () => penState(false));
+  pad.addEventListener('pointerleave', () => { if (drawing) penState(false); });
+  q1('#s1Tp').addEventListener('change', () => penState(false));
+  q1('#s1Clear').onclick = () => { clearPad(); penState(false); };
+  function padImage(){ // crop to the ink and scale down to max 600×220
+    const d = pctx.getImageData(0, 0, pad.width, pad.height).data; let x0 = pad.width, y0 = pad.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < pad.height; y++) for (let x = 0; x < pad.width; x++) if (d[(y * pad.width + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return '';
+    const m = 8; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(pad.width - 1, x1 + m); y1 = Math.min(pad.height - 1, y1 + m);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, r = Math.min(1, 600 / w, 220 / h);
+    const cv = document.createElement('canvas'); cv.width = Math.round(w * r); cv.height = Math.round(h * r);
+    cv.getContext('2d').drawImage(pad, x0, y0, w, h, 0, 0, cv.width, cv.height); return cv.toDataURL('image/png');
+  }
+
+  // upload
+  async function prevUpload(){
+    const f = q1('#s1File').files[0]; if (!f) { upl1 = ''; return; }
+    try { upl1 = await processImage(f, q1('#s1Trans').checked); q1('#s1Pv').innerHTML = `<img src="${upl1}" alt=""> <span class="hint">This is how it will print.</span>`; msg1(''); }
+    catch (e) { upl1 = ''; msg1(e.message, true); }
+  }
+  q1('#s1File').addEventListener('change', prevUpload); q1('#s1Trans').addEventListener('change', prevUpload);
+
+  // library
+  let lib1 = '';
+  function renderLib(){
+    const s = find(sg1.value); lib1 = s ? s.data_url : '';
+    q1('#s1Lib').innerHTML = s ? `<img src="${s.data_url}" alt=""> <span class="hint">Saved signature for <b>${E(s.name)}</b>.</span>`
+      : `<span class="hint">No saved signature matches <b>${E(sg1.value || '(no employee name yet)')}</b>. Add one with the toolbar <b>Signatures</b> button, or use Draw / Upload.</span>`;
+  }
+
+  function openSig1(){
+    if (!sg1.value.trim()) { mirrorEmployee(true); }
+    q1('#s1Who').innerHTML = `Employee: <b>${E(sg1.value || '—')}</b>. The signature is saved with this turnover record and printed above the name.`;
+    clearPad(); upl1 = ''; q1('#s1File').value = ''; q1('#s1Pv').innerHTML = '<span class="hint">Photo or scan of the employee\'s signature (black ink on white paper, cropped close).</span>';
+    showTab('draw'); penState(false); m1.hidden = false;
+  }
+  q1('#s1Use').onclick = () => {
+    let url = '';
+    if (tab1 === 'draw') { if (!inked) { msg1('Draw the signature first.', true); return; } url = padImage(); }
+    else if (tab1 === 'upload') { if (!upl1) { msg1('Choose an image first.', true); return; } url = upl1; }
+    else { if (!lib1) { msg1('No saved signature for this name.', true); return; } url = lib1; }
+    setSg1Sig(url); m1.hidden = true;
+    if (!document.querySelector('[name=sg1_date]').value) { const dt = document.querySelector('[name=sg1_date]'); dt.value = new Date().toLocaleDateString('en-CA'); dt.dispatchEvent(new Event('input', { bubbles: true })); }
+  };
+  applySg1();
+
   /* ---------- modal ---------- */
   const modal = document.createElement('div'); modal.className = 'sm'; modal.hidden = true;
   modal.innerHTML = `
