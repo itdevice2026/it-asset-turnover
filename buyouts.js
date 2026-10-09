@@ -62,6 +62,9 @@
   // approval: both the IT Manager and the Administrative Manager must approve
   const approvedBoth = r => !!((r.approver_it || '').trim() && (r.approver_admin || '').trim());
   const buyerLabel = k => k === 'emp' ? 'Another employee' : k === 'out' ? 'Outside party' : 'Employee (turned over)';
+  // a turnover counts as already in the register when a buyout is linked to it, or carries its control no. (link lost)
+  const ctrlKey = v => String(v || '').trim().toUpperCase();
+  const coveredBy = t => rows.find(b => b.turnover_id === t._id) || (ctrlKey(t.ctrl_no) && rows.find(b => !b.turnover_id && ctrlKey(b.turnover_ctrl_no) === ctrlKey(t.ctrl_no))) || null;
   const itemsTotal = items => (items || []).reduce((s, it) => s + num(it.price) * (num(it.qty) || 1), 0);
   const sigImg = name => { const u = (name && typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
 
@@ -164,6 +167,10 @@
     row.installments = row.installments === '' || row.installments == null ? null : (parseInt(row.installments, 10) || null);
     const p = payOf(row); row.pay_status = p.status; row.amount_paid = p.paid; row.paid_date = p.status === 'Fully paid' ? p.lastDate : null;
     ['released_date','rcvd_date','approved_date','buyer_date','approver_it_date','approver_admin_date'].forEach(k => { if (!row[k]) row[k] = null; });
+    if (!row.turnover_id && ctrlKey(row.turnover_ctrl_no)) { // keep the record tied to its turnover even if the link was dropped
+      const t = turnovers().find(x => ctrlKey(x.ctrl_no) === ctrlKey(row.turnover_ctrl_no));
+      if (t && !rows.some(b => b.turnover_id === t._id && b.id !== row.id)) row.turnover_id = t._id;
+    }
     if (!row.turnover_id) row.turnover_id = null;
     if (isNew) { delete row.id; row.created_by = currentUser?.id || null; if (!row.ref_no) row.ref_no = nextRef(row.company); }
     const { data, error } = await sb.from('itat_buyouts').upsert(row).select().single();
@@ -505,7 +512,7 @@
   function openEdit(rec){
     F.reset(); bmMsg(''); amountAuto = true;
     fv('company').innerHTML = '<option value="">— select —</option>' + companies().map(c => `<option>${E(c.name)}</option>`).join('');
-    const used = new Set(rows.filter(r => r.turnover_id && (!rec || r.id !== rec.id)).map(r => r.turnover_id));
+    const used = new Set(turnovers().filter(t => { const b = coveredBy(t); return b && (!rec || b.id !== rec.id); }).map(t => t._id));
     const tos = turnovers().sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')));
     fv('turnover_id').innerHTML = '<option value="">— none (direct buyout) —</option>' + tos.map(r => `<option value="${E(r._id)}" ${used.has(r._id) ? 'disabled' : ''}>${E([r.ctrl_no || '(no ctrl no.)', r.emp_name, r.emp_date].filter(Boolean).join(' · '))}${r.bo_enabled ? ' · with buyout' : ''}${used.has(r._id) ? ' — already in register' : ''}</option>`).join('');
     em.querySelector('#bmCos').innerHTML = companies().map(c => `<option value="${E(c.name)}">`).join('');
@@ -588,8 +595,7 @@
   document.body.appendChild(im);
   let imList = [];
   function openImport(onlyId){
-    const linked = new Set(rows.map(r => r.turnover_id).filter(Boolean));
-    imList = turnovers().filter(r => r.bo_enabled && !linked.has(r._id) && (!onlyId || r._id === onlyId)).sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')));
+    imList = turnovers().filter(r => r.bo_enabled && !coveredBy(r) && (!onlyId || r._id === onlyId)).sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')));
     im.querySelector('#imMsg').textContent = ''; im.querySelector('#imMsg').classList.remove('err');
     im.querySelector('#imRows').innerHTML = imList.length ? imList.map((r, k) => { const b = fromTurnover(r), p = payOf(b); return `<tr><td><input type="checkbox" data-k="${k}" checked></td><td class="m">${E(r.ctrl_no || '—')}<br><span class="small">${E(fmtD(r.emp_date))}</span></td><td>${E(r.emp_name || '')}<br><span class="small">${E(coName(r))}</span></td><td>${b.items.map(i => E(i.type) + (i.tag ? ` <span class="small">${E(i.tag)}</span>` : '')).join('<br>') || '<span class="small">no items ticked</span>'}</td><td class="m" style="text-align:right">${b.amount ? money(b.amount) : '—'}</td><td><span class="byo-pill ${p.cls}">${p.status}</span></td></tr>`; }).join('')
       : `<tr><td colspan="6" class="empty" style="padding:22px;text-align:center;color:var(--muted)">No turnover buyouts waiting to be imported — every Section 7 buyout is already in the register.</td></tr>`;
@@ -638,7 +644,7 @@
   document.body.appendChild(pk);
   function renderPick(){
     const q = pk.querySelector('#pkQ').value.trim().toLowerCase();
-    const linked = new Map(rows.filter(r => r.turnover_id).map(r => [r.turnover_id, r]));
+    const linked = { get: id => { const t = turnovers().find(x => x._id === id); return t ? coveredBy(t) : null; } };
     const list = turnovers().sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')))
       .filter(r => !q || [r.ctrl_no, r.emp_name, r.emp_id, coName(r), ...turnoverAssets(r, false).flatMap(a => [a.type, a.tag, a.sn, a.desc])].join(' ').toLowerCase().includes(q));
     pk.querySelector('#pkRows').innerHTML = list.length ? list.map(r => { const a = turnoverAssets(r, false), b = linked.get(r._id); return `<tr${b ? ' style="opacity:.6"' : ''}>
@@ -671,10 +677,14 @@
   let autoBusy = false;
   async function autoImport(){
     if (autoBusy || !currentUser || !loaded) return;
-    const linked = new Set(rows.map(r => r.turnover_id).filter(Boolean));
+    // re-attach buyouts that lost their turnover link but still carry its control no. (prevents duplicates)
+    for (const b of rows.filter(x => !x.turnover_id && ctrlKey(x.turnover_ctrl_no))) {
+      const t = turnovers().find(x => ctrlKey(x.ctrl_no) === ctrlKey(b.turnover_ctrl_no));
+      if (t && !rows.some(x => x.turnover_id === t._id)) { try { await sb.from('itat_buyouts').update({ turnover_id: t._id }).eq('id', b.id); b.turnover_id = t._id; } catch (e) {} }
+    }
     const formOpen = document.getElementById('form') && !document.getElementById('form').hidden;
     const editing = formOpen && typeof currentId !== 'undefined' ? currentId : null; // wait until the user leaves the record
-    const todo = turnovers().filter(r => r.bo_enabled && !linked.has(r._id) && r._id !== editing);
+    const todo = turnovers().filter(r => r.bo_enabled && !coveredBy(r) && r._id !== editing);
     if (!todo.length) return;
     autoBusy = true; let n = 0;
     try { for (const r of todo) { const b = fromTurnover(r); if (rows.some(x => x.ref_no === b.ref_no)) b.ref_no = ''; try { await save(b); n++; } catch (e) { if (!/already linked/.test(e.message)) console.warn('Buyout auto-import', r.ctrl_no, e.message); } } }
