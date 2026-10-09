@@ -59,6 +59,8 @@
     if (kind !== 'same' && (r.buyer_name || '').trim()) return { kind, other: true, name: r.buyer_name.trim(), id: r.buyer_emp_id || '', dept: r.buyer_dept || '', pos: r.buyer_pos || '', company: r.buyer_company || '', contact: r.buyer_contact || '', address: r.buyer_address || '', idref: r.buyer_idref || '', rel: r.buyer_rel || '' };
     return { kind: 'same', other: false, name: r.emp_name || '', id: r.emp_id || '', dept: r.emp_dept || '', pos: r.emp_pos || '', company: r.company || '', contact: r.buyer_contact || '', address: '', idref: '', rel: '' };
   }
+  // approval: both the IT Manager and the Administrative Manager must approve
+  const approvedBoth = r => !!((r.approver_it || '').trim() && (r.approver_admin || '').trim());
   const buyerLabel = k => k === 'emp' ? 'Another employee' : k === 'out' ? 'Outside party' : 'Employee (turned over)';
   const itemsTotal = items => (items || []).reduce((s, it) => s + num(it.price) * (num(it.qty) || 1), 0);
   const sigImg = name => { const u = (name && typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
@@ -156,7 +158,7 @@
     row.amount = row.amount === '' || row.amount == null ? null : num(row.amount);
     row.installments = row.installments === '' || row.installments == null ? null : (parseInt(row.installments, 10) || null);
     const p = payOf(row); row.pay_status = p.status; row.amount_paid = p.paid; row.paid_date = p.status === 'Fully paid' ? p.lastDate : null;
-    ['released_date','rcvd_date','approved_date','buyer_date'].forEach(k => { if (!row[k]) row[k] = null; });
+    ['released_date','rcvd_date','approved_date','buyer_date','approver_it_date','approver_admin_date'].forEach(k => { if (!row[k]) row[k] = null; });
     if (!row.turnover_id) row.turnover_id = null;
     if (isNew) { delete row.id; row.created_by = currentUser?.id || null; if (!row.ref_no) row.ref_no = nextRef(row.company); }
     const { data, error } = await sb.from('itat_buyouts').upsert(row).select().single();
@@ -175,19 +177,19 @@
   async function syncTurnover(b){
     if (!b.turnover_id || typeof store === 'undefined' || !store.records) return;
     const p = payOf(b);
-    const vals = { bo_pay_status: p.status, bo_amount_paid: p.paid ? p.paid.toFixed(2) : '', bo_paid_date: p.status === 'Fully paid' ? (p.lastDate || '') : '', bo_amount: b.amount != null ? Number(b.amount).toFixed(2) : '', bo_or_no: p.lastOr || '', bo_date: p.lastDate || '' };
+    const vals = { bo_appr_it: b.approver_it || '', bo_appr_it_date: b.approver_it_date || '', bo_appr_admin: b.approver_admin || '', bo_appr_admin_date: b.approver_admin_date || '', bo_pay_status: p.status, bo_amount_paid: p.paid ? p.paid.toFixed(2) : '', bo_paid_date: p.status === 'Fully paid' ? (p.lastDate || '') : '', bo_amount: b.amount != null ? Number(b.amount).toFixed(2) : '', bo_or_no: p.lastOr || '', bo_date: p.lastDate || '' };
     if (typeof currentId !== 'undefined' && currentId === b.turnover_id && typeof form !== 'undefined') {
       // the record is open in the form: write into the fields and let autosave persist them
       const f = document.getElementById('form'); if (!f || !f.querySelector('[name=bo_enabled]')?.checked) return;
       let changed = false;
-      for (const [k, v] of Object.entries(vals)) { const el = f.querySelector(`[name="${k}"]`); if (el && el.value !== v && !(k === 'bo_or_no' && !v) && !(k === 'bo_date' && !v)) { el.value = v; changed = true; } }
+      for (const [k, v] of Object.entries(vals)) { const el = f.querySelector(`[name="${k}"]`); if (el && el.value !== v && !(/^bo_(or_no|date|appr_)/.test(k) && !v)) { el.value = v; changed = true; } }
       if (changed) f.querySelector('[name=bo_amount_paid]')?.dispatchEvent(new Event('input', { bubbles: true }));
       return;
     }
     const rec = store.records.get(b.turnover_id); if (!rec || !rec.bo_enabled) return;
     const next = { ...rec };
     let changed = false;
-    for (const [k, v] of Object.entries(vals)) { if ((k === 'bo_or_no' || k === 'bo_date') && !v) continue; if ((rec[k] || '') !== v) { next[k] = v; changed = true; } }
+    for (const [k, v] of Object.entries(vals)) { if (/^bo_(or_no|date|appr_)/.test(k) && !v) continue; if ((rec[k] || '') !== v) { next[k] = v; changed = true; } }
     if (!changed) return;
     next._updated = new Date().toISOString();
     await store.put(next);
@@ -199,7 +201,7 @@
   view.innerHTML = `
     <div class="head">
       <div><h2 class="title">IT Asset Buyout Register</h2>
-        <div class="sub">Company IT assets sold to employees, taken from the Turnover records (Section 7 buyouts are added automatically). Workflow: Draft → For approval → Approved → Released. Payments are tracked per installment / OR.</div></div>
+        <div class="sub">Company IT assets sold to employees, taken from the Turnover records (Section 7 buyouts are added automatically). Workflow: Draft → For approval → Approved (IT Manager + Administrative Manager) → Released. Payments are tracked per installment / OR.</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="byoAdd" title="Pick the turnover record the buyout comes from">+ New buyout from turnover</button><button class="btn" id="byoDirect" title="Buyout without a turnover record">Direct buyout</button><button class="btn" id="byoImport" title="Bring in the Section 7 buyouts already recorded in turnover records">Import from turnovers</button></div>
     </div>
     <div class="kpis" id="byoKpis"></div>
@@ -226,7 +228,7 @@
       if (filt.company && r.company !== filt.company) return false;
       if (filt.status && (filt.status === 'open' ? ['Released','Cancelled'].includes(r.status) : r.status !== filt.status)) return false;
       if (filt.pay) { const p = payOf(r).status; if (filt.pay === 'due' ? (p === 'Fully paid' || r.status === 'Cancelled') : p !== filt.pay) return false; }
-      if (q) { const hay = [r.ref_no, r.company, r.emp_name, r.buyer_name, r.buyer_emp_id, r.buyer_contact, r.buyer_type, r.emp_id, r.emp_dept, r.emp_pos, r.turnover_ctrl_no, r.occasion, r.method, r.status, r.remarks, r.approved_by, r.released_by, ...(r.items || []).flatMap(i => [i.type, i.tag, i.sn, i.desc]), ...(r.payments || []).flatMap(p => [p.or_no, p.remarks])].join(' ').toLowerCase(); if (!hay.includes(q)) return false; }
+      if (q) { const hay = [r.ref_no, r.company, r.emp_name, r.buyer_name, r.buyer_emp_id, r.buyer_contact, r.buyer_type, r.emp_id, r.emp_dept, r.emp_pos, r.turnover_ctrl_no, r.occasion, r.method, r.status, r.remarks, r.approver_it, r.approver_admin, r.released_by, ...(r.items || []).flatMap(i => [i.type, i.tag, i.sn, i.desc]), ...(r.payments || []).flatMap(p => [p.or_no, p.remarks])].join(' ').toLowerCase(); if (!hay.includes(q)) return false; }
       return true;
     });
     list.sort((a, b) => { let x = a[sortKey] ?? '', y = b[sortKey] ?? ''; if (sortKey === 'amount') { x = num(x); y = num(y); } const c = x < y ? -1 : x > y ? 1 : 0; return sortAsc ? c : -c; });
@@ -254,7 +256,7 @@
       <td>${summary || '<span class="small">—</span>'}</td>
       <td class="r">${r.amount != null ? money(r.amount) : '—'}${r.method ? `<br><span class="small" style="font-family:var(--body,inherit)">${E(r.method)}${r.installments > 1 ? ' · ' + r.installments + ' inst.' : ''}</span>` : ''}</td>
       <td class="r"><span class="byo-pill ${p.cls}">${E(p.status)}</span><br>${money(p.paid)}${p.balance > 0 ? `<br><span style="color:var(--crit)">bal ${money(p.balance)}</span>` : ''}</td>
-      <td><span class="byo-pill ${statusCls(r.status)}">${E(r.status)}</span>${r.released_date && r.status === 'Released' ? `<br><span class="small">${E(fmtD(r.released_date))}</span>` : ''}${r.approved_by && ['Approved','Released'].includes(r.status) ? `<br><span class="small">appr. ${E(r.approved_by)}</span>` : ''}</td>
+      <td><span class="byo-pill ${statusCls(r.status)}">${E(r.status)}</span>${r.released_date && r.status === 'Released' ? `<br><span class="small">${E(fmtD(r.released_date))}</span>` : ''}${r.status === 'Cancelled' ? '' : `<br><span class="small" title="IT Manager: ${E(r.approver_it || 'not yet')} · Administrative Manager: ${E(r.approver_admin || 'not yet')}">${r.approver_it ? '✓' : '○'} IT Mgr · ${r.approver_admin ? '✓' : '○'} Admin Mgr</span>`}${['Approved','Released'].includes(r.status) && !approvedBoth(r) ? '<br><span class="byo-pill unpaid" title="Needs approval by both the IT Manager and the Administrative Manager">Approval incomplete</span>' : ''}</td>
       <td class="small" style="white-space:nowrap">${E(fmtD(r.updated_at))}</td>
       <td><div class="acts"><button type="button" data-edit>Edit</button><button type="button" data-form>Form</button><button type="button" class="del" data-del>Remove</button></div></td></tr>`; }).join('')
       : `<tr><td colspan="9" class="empty">${rows.length ? 'No buyouts match the current filter.' : 'No buyouts recorded yet. Use <b>+ New buyout</b> to record a sale of IT asset(s) to an employee, or <b>Import from turnovers</b> to bring in Section 7 buyouts.'}</td></tr>`;
@@ -363,8 +365,11 @@
         <h3>Status &amp; sign-off</h3>
         <div class="grid">
           <label>Status <select name="status">${STATUSES.map(s => `<option>${s}</option>`).join('')}</select></label>
-          <label class="w2">Approved by (Management / Finance) <input name="approved_by"></label>
-          <label>Approval date <input name="approved_date" type="date"></label>
+          <label class="w2">Approved by &mdash; IT Manager <input name="approver_it"></label>
+          <label>IT Manager approval date <input name="approver_it_date" type="date"></label>
+          <label class="w2">Approved by &mdash; Administrative Manager <input name="approver_admin"></label>
+          <label>Admin. Manager approval date <input name="approver_admin_date" type="date"></label>
+          <span class="hint" style="grid-column:1/-1;margin-top:-4px">Both approvals are required before the buyout can be set to <b>Approved</b> or <b>Released</b>.</span>
           <label class="w2">Released by (IT Department) <input name="released_by"></label>
           <label>Release date <input name="released_date" type="date"></label>
           <label>Buyer acknowledged on <input name="buyer_date" type="date"></label>
@@ -455,7 +460,7 @@
       if (r.bo_amount && !fv('amount').value) { fv('amount').value = num(r.bo_amount).toFixed(2); amountAuto = false; }
       if (r.bo_basis && !fv('basis').value) fv('basis').value = r.bo_basis;
       if (r.bo_method && !fv('method').value) fv('method').value = r.bo_method;
-      if (r.bo_approved_by && !fv('approved_by').value) fv('approved_by').value = r.bo_approved_by;
+      [['approver_it','bo_appr_it'],['approver_it_date','bo_appr_it_date'],['approver_admin','bo_appr_admin'],['approver_admin_date','bo_appr_admin_date']].forEach(([k, src]) => { if (r[src] && !fv(k).value) fv(k).value = r[src]; });
     }
     if (!fv('occasion').value) fv('occasion').value = r.r_resign ? 'Resignation / separation' : r.r_term ? 'End of contract' : r.r_replace ? 'Equipment refresh / upgrade program' : '';
     if (!fv('released_by').value && r.sg2_name) fv('released_by').value = r.sg2_name;
@@ -465,7 +470,7 @@
   fv('turnover_id').addEventListener('change', () => { const r = turnovers().find(x => x._id === fv('turnover_id').value); fv('turnover_ctrl_no').value = r ? (r.ctrl_no || '') : ''; });
   fv('status').addEventListener('change', () => {
     const s = fv('status').value;
-    if (s === 'Approved' && !fv('approved_date').value) fv('approved_date').value = today();
+    if (s === 'Approved' || s === 'Released') { if (fv('approver_it').value && !fv('approver_it_date').value) fv('approver_it_date').value = today(); if (fv('approver_admin').value && !fv('approver_admin_date').value) fv('approver_admin_date').value = today(); }
     if (s === 'Released') { if (!fv('released_date').value) fv('released_date').value = today(); if (!fv('buyer_date').value) fv('buyer_date').value = today(); }
   });
 
@@ -489,7 +494,9 @@
     em.querySelector('#bmCos').innerHTML = companies().map(c => `<option value="${E(c.name)}">`).join('');
     em.querySelector('#bmEmps').innerHTML = [...empIndex().values()].map(r => `<option value="${E(r.emp_name)}">${E([r.emp_id, r.emp_dept].filter(Boolean).join(' · '))}</option>`).join('');
     const last = rows[0] || {};
-    const r = rec || { status: 'Draft', company: last.company || '', released_by: last.released_by || '', rcvd_name: last.rcvd_name || '', approved_by: '' };
+    const lastAppr = rows.find(x => x.approver_it || x.approver_admin) || {};
+    const r = rec || { status: 'Draft', company: last.company || '', released_by: last.released_by || '', rcvd_name: last.rcvd_name || '', approver_it: lastAppr.approver_it || '', approver_admin: lastAppr.approver_admin || '' };
+    if (rec && !rec.id) { if (!r.approver_it) r.approver_it = lastAppr.approver_it || ''; if (!r.approver_admin) r.approver_admin = lastAppr.approver_admin || ''; }
     em.querySelector('#bmTitle').textContent = rec && rec.id ? `Edit buyout ${rec.ref_no || ''}` : 'New asset buyout';
     F.querySelectorAll('input[name],select[name],textarea[name]').forEach(el => { if (el.type === 'checkbox') el.checked = !!r[el.name]; else if (el.name !== 'ref_view') el.value = r[el.name] ?? ''; });
     if (r.company && !fv('company').value) { fv('company').insertAdjacentHTML('beforeend', `<option>${E(r.company)}</option>`); fv('company').value = r.company; }
@@ -519,6 +526,9 @@
     if (bk === 'out') ['buyer_emp_id','buyer_dept','buyer_pos','buyer_company'].forEach(k => { o[k] = ''; });
     if (!o.items.length) { bmMsg('Add at least one IT asset being sold.', true); return; }
     if (o.items.some(it => !it.type)) { bmMsg('Every asset row needs an asset type.', true); return; }
+    if (['Approved','Released'].includes(o.status) && !approvedBoth(o)) { bmMsg('A buyout needs approval by both the IT Manager and the Administrative Manager before it can be ' + o.status.toLowerCase() + '.', true); fv(o.approver_it ? 'approver_admin' : 'approver_it').focus(); return; }
+    if (['Approved','Released'].includes(o.status)) { if (!o.approver_it_date) o.approver_it_date = today(); if (!o.approver_admin_date) o.approver_admin_date = today(); }
+    if (['Draft','For approval'].includes(o.status) && approvedBoth(o) && o.approver_it_date && o.approver_admin_date) { o.status = 'Approved'; flash('Both approvals recorded — status set to Approved.'); }
     if (o.status === 'Released' && !num(o.amount)) { bmMsg('Set the agreed buyout price before releasing.', true); fv('amount').focus(); return; }
     const btns = em.querySelectorAll('.btns button'); btns.forEach(b => b.disabled = true); bmMsg('Saving…');
     try {
@@ -544,9 +554,9 @@
       occasion: r.r_resign ? 'Resignation / separation' : r.r_term ? 'End of contract' : r.r_replace ? 'Equipment refresh / upgrade program' : '',
       turnover_id: r._id, turnover_ctrl_no: r.ctrl_no || '', ref_no: (r.ctrl_no || '').trim() ? r.ctrl_no.trim() + '-BO' : '',
       items: turnoverAssets(r, true), amount: amount || null, basis: r.bo_basis || '', method: r.bo_method || '', payments,
-      approved_by: r.bo_approved_by || '', released_by: r.sg2_name || '', released_date: fully ? (r.sg2_date || payDate || '') : '',
+      approver_it: r.bo_appr_it || '', approver_it_date: r.bo_appr_it_date || '', approver_admin: r.bo_appr_admin || '', approver_admin_date: r.bo_appr_admin_date || '', released_by: r.sg2_name || '', released_date: fully ? (r.sg2_date || payDate || '') : '',
       rcvd_name: r.bo_rcvd_name || '', rcvd_date: r.bo_rcvd_date || '', buyer_date: r.bo_buyer_date || '', remarks: r.bo_remarks || '',
-      status: fully ? 'Released' : r.bo_approved_by ? 'Approved' : 'For approval',
+      status: (r.bo_appr_it && r.bo_appr_admin) ? (fully ? 'Released' : 'Approved') : 'For approval',
       buyer_type: r.bo_buyer_type && (r.bo_buyer || '').trim() ? r.bo_buyer_type : '', buyer_name: r.bo_buyer_type ? (r.bo_buyer || '') : '',
       buyer_emp_id: r.bo_buyer_emp_id || '', buyer_dept: r.bo_buyer_dept || '', buyer_pos: r.bo_buyer_pos || '', buyer_company: /^Another/.test(r.bo_buyer_type || '') ? coName(r) : '',
       buyer_contact: r.bo_buyer_contact || '', buyer_address: r.bo_buyer_address || '', buyer_idref: r.bo_buyer_idref || '', buyer_rel: r.bo_buyer_rel || ''
@@ -658,7 +668,7 @@
   /* ===================== CSV ===================== */
   function exportCsv(){
     const list = filtered();
-    const head = ['ref_no','company','buyer','buyer_type','buyer_emp_id','buyer_dept','buyer_contact','buyer_address','buyer_rel','emp_name','emp_id','emp_dept','emp_pos','occasion','turnover_ctrl_no','status','items','asset_tags','serial_nos','amount','basis','method','installments','amount_paid','balance','pay_status','paid_date','or_nos','approved_by','approved_date','released_by','released_date','rcvd_name','buyer_date','data_wiped','licenses_removed','remarks','created_at','updated_at'];
+    const head = ['ref_no','company','buyer','buyer_type','buyer_emp_id','buyer_dept','buyer_contact','buyer_address','buyer_rel','emp_name','emp_id','emp_dept','emp_pos','occasion','turnover_ctrl_no','status','items','asset_tags','serial_nos','amount','basis','method','installments','amount_paid','balance','pay_status','paid_date','or_nos','approver_it','approver_it_date','approver_admin','approver_admin_date','released_by','released_date','rcvd_name','buyer_date','data_wiped','licenses_removed','remarks','created_at','updated_at'];
     const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const lines = list.map(r => { const p = payOf(r), its = r.items || [], b = buyerOf(r); const v = { ...r, buyer: b.name, buyer_type: buyerLabel(b.kind),
       items: its.map(i => `${i.type}${num(i.qty) > 1 ? ' x' + i.qty : ''}${i.desc ? ' (' + i.desc + ')' : ''}${i.price != null ? ' @' + num(i.price).toFixed(2) : ''}`).join('; '),
@@ -768,8 +778,9 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
   <div class="signs">
     <div class="sg"><div class="line">${E(b.name)}</div><div class="role">Buyer${b.kind === 'out' ? ' (Outside party)' : ' (Employee)'} &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtLong(r.buyer_date))}</span></div></div>
     <div class="sg">${sigImg(r.released_by)}<div class="line">${E(r.released_by || '')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtLong(r.released_date))}</span></div></div>
+    <div class="sg">${sigImg(r.approver_it)}<div class="line">${E(r.approver_it || '')}</div><div class="role">Approved by &mdash; IT Manager</div><div class="dt">Date:<span>${E(fmtLong(r.approver_it_date))}</span></div></div>
+    <div class="sg">${sigImg(r.approver_admin)}<div class="line">${E(r.approver_admin || '')}</div><div class="role">Approved by &mdash; Administrative Manager</div><div class="dt">Date:<span>${E(fmtLong(r.approver_admin_date))}</span></div></div>
     <div class="sg">${sigImg(r.rcvd_name)}<div class="line">${E(r.rcvd_name || '')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtLong(r.rcvd_date))}</span></div></div>
-    <div class="sg">${sigImg(r.approved_by)}<div class="line">${E(r.approved_by || '')}</div><div class="role">Approved by &mdash; Management / Finance</div><div class="dt">Date:<span>${E(fmtLong(r.approved_date))}</span></div></div>
     ${b.other ? `<div class="sg"><div class="line">${E(r.emp_name || '')}</div><div class="role">Conforme &mdash; Employee who turned over the asset(s) (last custodian)</div><div class="dt">Date:<span></span></div></div>` : ''}
   </div>
 
@@ -786,17 +797,19 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     const cos = [...new Set(list.map(r => r.company).filter(Boolean))], co = cos.length === 1 ? cos[0] : 'Meatplus Group', gen = fmtD(today());
     const tot = list.reduce((s, r) => s + num(r.amount), 0), paid = list.reduce((s, r) => s + payOf(r).paid, 0);
     const filterTxt = [filt.status ? 'Status: ' + (filt.status === 'open' ? 'Open' : filt.status) : '', filt.pay ? 'Payment: ' + (filt.pay === 'due' ? 'With balance' : filt.pay) : '', filt.company ? 'Company: ' + filt.company : '', filt.q ? 'Search: "' + filt.q + '"' : ''].filter(Boolean).join(' · ');
-    const body = list.map((r, i) => { const p = payOf(r); return `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</td><td>${E(r.company || '')}</td><td>${(() => { const b = buyerOf(r); return `${E(b.name)}${b.other ? ` <i style="color:#444">(${E(b.kind === 'out' ? 'outside party' : 'other employee')})</i>` : ''}<br><span style="color:#444">${E((b.kind === 'out' ? [b.contact] : [b.id, b.dept]).filter(Boolean).join(' · '))}${b.other ? '<br>turned over by ' + E(r.emp_name || '') : ''}</span>`; })()}</td><td>${(r.items || []).map(it => `${E(it.type || '')}${it.tag ? ' · ' + E(it.tag) : ''}${it.sn ? ' · ' + E(it.sn) : ''}`).join('<br>')}</td><td>${E(r.method || '')}</td><td class="r">${r.amount != null ? money(r.amount) : ''}</td><td class="r">${money(p.paid)}</td><td class="r">${money(p.balance)}</td><td>${E(p.status)}<br>${E((r.payments || []).map(x => x.or_no).filter(Boolean).join(', '))}</td><td>${E(r.status || '')}${r.released_date ? '<br>' + E(fmtD(r.released_date)) : ''}</td></tr>`; }).join('');
+    const body = list.map((r, i) => { const p = payOf(r); return `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</td><td>${E(r.company || '')}</td><td>${(() => { const b = buyerOf(r); return `${E(b.name)}${b.other ? ` <i style="color:#444">(${E(b.kind === 'out' ? 'outside party' : 'other employee')})</i>` : ''}<br><span style="color:#444">${E((b.kind === 'out' ? [b.contact] : [b.id, b.dept]).filter(Boolean).join(' · '))}${b.other ? '<br>turned over by ' + E(r.emp_name || '') : ''}</span>`; })()}</td><td>${(r.items || []).map(it => `${E(it.type || '')}${it.tag ? ' · ' + E(it.tag) : ''}${it.sn ? ' · ' + E(it.sn) : ''}`).join('<br>')}</td><td>${E(r.method || '')}</td><td class="r">${r.amount != null ? money(r.amount) : ''}</td><td class="r">${money(p.paid)}</td><td class="r">${money(p.balance)}</td><td>${E(p.status)}<br>${E((r.payments || []).map(x => x.or_no).filter(Boolean).join(', '))}</td><td>${E(r.status || '')}${r.released_date ? '<br>' + E(fmtD(r.released_date)) : ''}</td><td>${E(r.approver_it || '—')}${r.approver_it_date ? ' (' + E(fmtD(r.approver_it_date)) + ')' : ''}<br>${E(r.approver_admin || '—')}${r.approver_admin_date ? ' (' + E(fmtD(r.approver_admin_date)) + ')' : ''}</td></tr>`; }).join('');
     return docHead('IT Asset Buyout Register', '@page{size:A4 landscape}') + `<div class="land"><div class="sheet">
   <div class="hdr">${cos.length === 1 && logoFor(co) ? `<img src="${logoFor(co)}" alt="">` : ''}<div><div class="co">${E(co)}</div><div class="sub">Information Technology Department</div></div><div class="ref">Date generated: ${E(gen)}<br>Buyouts: <b>${list.length}</b>${filterTxt ? '<br>' + E(filterTxt) : ''}</div></div>
   <h1>IT ASSET BUYOUT REGISTER</h1>
   <div class="tagline">Company IT assets sold to employees &middot; price, payments and release status</div>
-  <table><thead><tr><th style="width:22px">#</th><th style="width:120px">Ref. No.</th><th>Company</th><th>Buyer</th><th>Asset(s) &middot; tag &middot; serial</th><th>Method</th><th style="width:78px">Price</th><th style="width:78px">Paid</th><th style="width:78px">Balance</th><th>Payment / OR</th><th style="width:72px">Status</th></tr></thead>
-  <tbody>${body || '<tr><td colspan="11" class="c">No buyouts</td></tr>'}</tbody>
-  <tfoot><tr><td colspan="6" style="text-align:right">Totals</td><td class="r">${money(tot)}</td><td class="r">${money(paid)}</td><td class="r">${money(Math.max(0, tot - paid))}</td><td colspan="2"></td></tr></tfoot></table>
+  <table><thead><tr><th style="width:22px">#</th><th style="width:120px">Ref. No.</th><th>Company</th><th>Buyer</th><th>Asset(s) &middot; tag &middot; serial</th><th>Method</th><th style="width:78px">Price</th><th style="width:78px">Paid</th><th style="width:78px">Balance</th><th>Payment / OR</th><th style="width:72px">Status</th><th>Approved by (IT Mgr / Admin Mgr)</th></tr></thead>
+  <tbody>${body || '<tr><td colspan="12" class="c">No buyouts</td></tr>'}</tbody>
+  <tfoot><tr><td colspan="6" style="text-align:right">Totals</td><td class="r">${money(tot)}</td><td class="r">${money(paid)}</td><td class="r">${money(Math.max(0, tot - paid))}</td><td colspan="3"></td></tr></tfoot></table>
   <div class="signs">
     <div class="sg"><div class="line"></div><div class="role">Prepared by &mdash; IT Department</div><div class="dt">Date:<span></span></div></div>
     <div class="sg"><div class="line"></div><div class="role">Verified by &mdash; Finance / Accounting</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg">${sigImg([...new Set(list.map(r => r.approver_it).filter(Boolean))].length === 1 ? list.find(r => r.approver_it).approver_it : '')}<div class="line">${E([...new Set(list.map(r => r.approver_it).filter(Boolean))].join(', '))}</div><div class="role">Approved by &mdash; IT Manager</div><div class="dt">Date:<span></span></div></div>
+    <div class="sg">${sigImg([...new Set(list.map(r => r.approver_admin).filter(Boolean))].length === 1 ? list.find(r => r.approver_admin).approver_admin : '')}<div class="line">${E([...new Set(list.map(r => r.approver_admin).filter(Boolean))].join(', '))}</div><div class="role">Approved by &mdash; Administrative Manager</div><div class="dt">Date:<span></span></div></div>
   </div>
   <div class="foot"><span>${E(co)} &middot; IT Asset Buyout Register</span><span>Generated ${E(gen)}</span></div>
 </div></div>` + docTail;
