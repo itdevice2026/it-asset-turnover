@@ -96,16 +96,23 @@
   }
 
   /* ---------- apply signatures to name fields ---------- */
-  const NAME_FIELDS = ['sg2_name','sg3_name']; // Received/Verified by (IT) and Noted by (Supervisor) only — never the employee
+  // Signatory fields that show the saved signature automatically when the typed name matches the library:
+  // Received/Verified by (IT), Noted by (Supervisor), and the Section 7 buyout approvers / payment receiver — never the employee or buyer
+  const NAME_FIELDS = ['sg2_name','sg3_name','bo_appr_it','bo_appr_admin','bo_rcvd_name'];
+  // datalist of saved signatory names, offered on every signatory field (here and in the Buyout register)
+  const nameList = document.createElement('datalist'); nameList.id = 'itatSigNames'; document.body.appendChild(nameList);
+  let nameListKey = '';
+  function refreshNames(){ const k = sigs.map(s => s.name_key).join('|'); if (k === nameListKey) return; nameListKey = k; nameList.innerHTML = sigs.map(s => `<option value="${String(s.name).replace(/"/g, '&quot;')}">`).join(''); }
   function applyTo(input){
     const wrap = input.parentElement; if (!wrap) return;
+    if (!input.getAttribute('list')) input.setAttribute('list', 'itatSigNames');
     wrap.classList.add('sig-wrap');
     let img = wrap.querySelector('.sig-img');
     const s = find(input.value);
     if (s) { if (!img) { img = document.createElement('img'); img.className = 'sig-img'; img.alt = ''; wrap.insertBefore(img, input); } if (img.src !== s.data_url) img.src = s.data_url; wrap.classList.add('sig-on'); }
     else { if (img) img.remove(); wrap.classList.remove('sig-on'); }
   }
-  function applyAll(){ NAME_FIELDS.forEach(n => document.querySelectorAll(`[name=${n}]`).forEach(applyTo)); }
+  function applyAll(){ refreshNames(); NAME_FIELDS.forEach(n => document.querySelectorAll(`[name=${n}]`).forEach(applyTo)); }
   const form = document.getElementById('form');
   form.addEventListener('input', e => { if (e.target && NAME_FIELDS.includes(e.target.name)) applyTo(e.target); });
   setInterval(applyAll, 500); // fill()/newForm() set values without events
@@ -123,7 +130,8 @@
     setInterval(() => mirrorEmployee(false), 500);
     mirrorEmployee(false);
   }
-  window.itatSignatureFor = name => (find(name) || {}).data_url || ''; // used by the generated Buyout Form
+  window.itatSignatureFor = name => (find(name) || {}).data_url || ''; // used by the generated forms and the Buyout register
+  window.itatSignatureNames = () => sigs.map(s => s.name);
 
   /* ---------- "Turned over by" (employee) signature — optional, per record ----------
      Stored in hidden field sg1_sig (PNG data URL) so it saves with the record via collect()/fill().
