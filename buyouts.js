@@ -52,6 +52,14 @@
     const cls = status === 'Fully paid' ? 'paid' : status === 'Partially paid' ? 'partial' : 'unpaid';
     return { amount, paid, balance: Math.max(0, amount - paid), status, cls, lastDate, lastOr, label: status === 'Fully paid' ? 'PAID' : status === 'Partially paid' ? 'PARTIALLY PAID' : 'UNPAID' };
   }
+  // who is buying: the employee who turned over the asset (default), another employee, or an outside party
+  const buyerKind = t => !t ? 'same' : /^Another/.test(t) ? 'emp' : 'out';
+  function buyerOf(r){
+    const kind = buyerKind(r.buyer_type);
+    if (kind !== 'same' && (r.buyer_name || '').trim()) return { kind, other: true, name: r.buyer_name.trim(), id: r.buyer_emp_id || '', dept: r.buyer_dept || '', pos: r.buyer_pos || '', company: r.buyer_company || '', contact: r.buyer_contact || '', address: r.buyer_address || '', idref: r.buyer_idref || '', rel: r.buyer_rel || '' };
+    return { kind: 'same', other: false, name: r.emp_name || '', id: r.emp_id || '', dept: r.emp_dept || '', pos: r.emp_pos || '', company: r.company || '', contact: r.buyer_contact || '', address: '', idref: '', rel: '' };
+  }
+  const buyerLabel = k => k === 'emp' ? 'Another employee' : k === 'out' ? 'Outside party' : 'Employee (turned over)';
   const itemsTotal = items => (items || []).reduce((s, it) => s + num(it.price) * (num(it.qty) || 1), 0);
   const sigImg = name => { const u = (name && typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
 
@@ -117,6 +125,7 @@
   .bm .tot{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--muted);padding:8px 10px;background:var(--ground);border-radius:6px}
   .bm .tot b{font-family:var(--mono);color:var(--ink);font-size:13px}
   .bm .scroll{overflow-x:auto}
+  .bm .grid label.byr[hidden]{display:none}
   .byo-link{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
   @media(max-width:760px){.bm .grid{grid-template-columns:1fr 1fr}.bm .grid label.w4{grid-column:span 2}}
   @media print{.byo,.bm,.byo-link{display:none!important}}`;
@@ -204,7 +213,7 @@
       <button class="btn" id="byoCsv">Export CSV</button>
     </div>
     <div class="tablewrap"><table>
-      <thead><tr><th data-sort="ref_no">Ref. No.</th><th data-sort="company">Company</th><th data-sort="emp_name">Employee</th><th>Asset(s)</th><th data-sort="amount" style="text-align:right">Price (PHP)</th><th style="text-align:right">Paid / Balance</th><th data-sort="status">Status</th><th data-sort="updated_at">Updated</th><th></th></tr></thead>
+      <thead><tr><th data-sort="ref_no">Ref. No.</th><th data-sort="company">Company</th><th data-sort="emp_name">Buyer</th><th>Asset(s)</th><th data-sort="amount" style="text-align:right">Price (PHP)</th><th style="text-align:right">Paid / Balance</th><th data-sort="status">Status</th><th data-sort="updated_at">Updated</th><th></th></tr></thead>
       <tbody id="byoRows"></tbody>
     </table></div>
     <div class="foot"><span id="byoFoot"></span><span class="small">"Form" opens the printable IT Asset Buyout Form (Deed of Sale · Proof of Purchase) for that buyout.</span></div>`;
@@ -217,7 +226,7 @@
       if (filt.company && r.company !== filt.company) return false;
       if (filt.status && (filt.status === 'open' ? ['Released','Cancelled'].includes(r.status) : r.status !== filt.status)) return false;
       if (filt.pay) { const p = payOf(r).status; if (filt.pay === 'due' ? (p === 'Fully paid' || r.status === 'Cancelled') : p !== filt.pay) return false; }
-      if (q) { const hay = [r.ref_no, r.company, r.emp_name, r.emp_id, r.emp_dept, r.emp_pos, r.turnover_ctrl_no, r.occasion, r.method, r.status, r.remarks, r.approved_by, r.released_by, ...(r.items || []).flatMap(i => [i.type, i.tag, i.sn, i.desc]), ...(r.payments || []).flatMap(p => [p.or_no, p.remarks])].join(' ').toLowerCase(); if (!hay.includes(q)) return false; }
+      if (q) { const hay = [r.ref_no, r.company, r.emp_name, r.buyer_name, r.buyer_emp_id, r.buyer_contact, r.buyer_type, r.emp_id, r.emp_dept, r.emp_pos, r.turnover_ctrl_no, r.occasion, r.method, r.status, r.remarks, r.approved_by, r.released_by, ...(r.items || []).flatMap(i => [i.type, i.tag, i.sn, i.desc]), ...(r.payments || []).flatMap(p => [p.or_no, p.remarks])].join(' ').toLowerCase(); if (!hay.includes(q)) return false; }
       return true;
     });
     list.sort((a, b) => { let x = a[sortKey] ?? '', y = b[sortKey] ?? ''; if (sortKey === 'amount') { x = num(x); y = num(y); } const c = x < y ? -1 : x > y ? 1 : 0; return sortAsc ? c : -c; });
@@ -241,7 +250,7 @@
       return `<tr data-id="${r.id}">
       <td class="m">${E(r.ref_no || '')}${r.turnover_ctrl_no ? `<br><span class="small" title="Linked turnover record">↳ ${E(r.turnover_ctrl_no)}</span>` : ''}</td>
       <td>${E(r.company || '')}</td>
-      <td><b>${E(r.emp_name || '')}</b><br><span class="small">${E([r.emp_id, r.emp_dept].filter(Boolean).join(' · '))}</span>${r.occasion ? `<br><span class="small">${E(r.occasion)}</span>` : ''}</td>
+      <td>${(() => { const b = buyerOf(r); return `<b>${E(b.name)}</b>${b.other ? ` <span class="byo-pill ${b.kind === 'out' ? 'pend' : 'appr'}">${b.kind === 'out' ? 'Outside party' : 'Other employee'}</span>` : ''}<br><span class="small">${E((b.kind === 'out' ? [b.contact, b.rel] : [b.id, b.dept]).filter(Boolean).join(' · '))}</span>${b.other ? `<br><span class="small">turned over by ${E(r.emp_name || '—')}</span>` : ''}`; })()}${r.occasion ? `<br><span class="small">${E(r.occasion)}</span>` : ''}</td>
       <td>${summary || '<span class="small">—</span>'}</td>
       <td class="r">${r.amount != null ? money(r.amount) : '—'}${r.method ? `<br><span class="small" style="font-family:var(--body,inherit)">${E(r.method)}${r.installments > 1 ? ' · ' + r.installments + ' inst.' : ''}</span>` : ''}</td>
       <td class="r"><span class="byo-pill ${p.cls}">${E(p.status)}</span><br>${money(p.paid)}${p.balance > 0 ? `<br><span style="color:var(--crit)">bal ${money(p.balance)}</span>` : ''}</td>
@@ -292,7 +301,7 @@
   em.innerHTML = `
     <div class="box" role="dialog" aria-label="Asset buyout">
       <h2><span id="bmTitle">New asset buyout</span> <button type="button" class="x" id="bmClose" aria-label="Close">×</button></h2>
-      <div class="sub">The buyout is taken from the turnover record — set the selling prices and record every payment received.</div>
+      <div class="sub">The buyout is taken from the turnover record. The buyer can be that employee, another employee or an outside party — set the selling prices and record every payment received.</div>
       <form id="bmForm" autocomplete="off">
         <input type="hidden" name="id"><input type="hidden" name="ref_no">
         <h3>Source turnover record <span class="hint" style="text-transform:none;letter-spacing:0">the employee and Section 2 assets come from this record · choose "none" only for a direct buyout</span></h3>
@@ -301,7 +310,7 @@
           <label>Turnover Control No. <input name="turnover_ctrl_no" readonly placeholder="—"></label>
           <label style="align-self:end"><button type="button" class="btn" id="bmFromTo">Load employee &amp; assets</button></label>
         </div>
-        <h3>1. Buyer (employee)</h3>
+        <h3>1. Employee who turned over the asset(s) <span class="hint" style="text-transform:none;letter-spacing:0">last custodian</span></h3>
         <div class="grid">
           <label class="w2">Company <select name="company" required><option value="">— select —</option></select></label>
           <label>Ref. No. <input name="ref_view" readonly placeholder="auto on save"></label>
@@ -311,6 +320,19 @@
           <label>Department <input name="emp_dept"></label>
           <label>Position <input name="emp_pos"></label>
           <label>Immediate supervisor <input name="emp_sup"></label>
+        </div>
+        <h3>Buyer</h3>
+        <div class="grid">
+          <label class="w2">Who is buying the asset(s)? <select name="buyer_type"><option value="">The employee who turned over the asset(s)</option><option>Another employee</option><option>Outside party (non-employee)</option></select></label>
+          <label class="w2 byr" data-for="emp out">Buyer full name <input name="buyer_name" list="bmEmps"></label>
+          <label class="byr" data-for="emp">Buyer employee ID <input name="buyer_emp_id"></label>
+          <label class="byr" data-for="emp">Department <input name="buyer_dept"></label>
+          <label class="byr" data-for="emp">Position <input name="buyer_pos"></label>
+          <label class="byr" data-for="emp">Company <input name="buyer_company" list="bmCos"><datalist id="bmCos"></datalist></label>
+          <label class="byr" data-for="emp out">Contact no. / e-mail <input name="buyer_contact"></label>
+          <label class="w2 byr" data-for="out">Address <input name="buyer_address"></label>
+          <label class="byr" data-for="out">Valid ID presented (type &amp; no.) <input name="buyer_idref"></label>
+          <label class="w2 byr" data-for="emp out">Relationship to the employee / company <input name="buyer_rel" placeholder="e.g. spouse, co-worker, outside buyer"></label>
         </div>
         <h3>2. IT asset(s) sold <span><button type="button" class="btn" id="bmAddItem">+ Add asset</button></span></h3>
         <div class="scroll"><table>
@@ -447,12 +469,24 @@
     if (s === 'Released') { if (!fv('released_date').value) fv('released_date').value = today(); if (!fv('buyer_date').value) fv('buyer_date').value = today(); }
   });
 
+  function syncBuyerFields(){
+    const k = buyerKind(fv('buyer_type').value);
+    F.querySelectorAll('.byr').forEach(l => { l.hidden = !l.dataset.for.split(' ').includes(k); });
+  }
+  fv('buyer_type').addEventListener('change', () => { syncBuyerFields(); if (fv('buyer_type').value) { if (buyerKind(fv('buyer_type').value) === 'emp' && !fv('buyer_company').value) fv('buyer_company').value = fv('company').value; fv('buyer_name').focus(); } });
+  fv('buyer_name').addEventListener('change', () => {
+    if (buyerKind(fv('buyer_type').value) !== 'emp') return;
+    const r = empIndex().get(fv('buyer_name').value.trim().toLowerCase()); if (!r) return;
+    [['buyer_emp_id','emp_id'],['buyer_dept','emp_dept'],['buyer_pos','emp_pos']].forEach(([k, src]) => { if (!fv(k).value && r[src]) fv(k).value = r[src]; });
+    const co = coName(r); if (co) fv('buyer_company').value = co;
+  });
   function openEdit(rec){
     F.reset(); bmMsg(''); amountAuto = true;
     fv('company').innerHTML = '<option value="">— select —</option>' + companies().map(c => `<option>${E(c.name)}</option>`).join('');
     const used = new Set(rows.filter(r => r.turnover_id && (!rec || r.id !== rec.id)).map(r => r.turnover_id));
     const tos = turnovers().sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')));
     fv('turnover_id').innerHTML = '<option value="">— none (direct buyout) —</option>' + tos.map(r => `<option value="${E(r._id)}" ${used.has(r._id) ? 'disabled' : ''}>${E([r.ctrl_no || '(no ctrl no.)', r.emp_name, r.emp_date].filter(Boolean).join(' · '))}${r.bo_enabled ? ' · with buyout' : ''}${used.has(r._id) ? ' — already in register' : ''}</option>`).join('');
+    em.querySelector('#bmCos').innerHTML = companies().map(c => `<option value="${E(c.name)}">`).join('');
     em.querySelector('#bmEmps').innerHTML = [...empIndex().values()].map(r => `<option value="${E(r.emp_name)}">${E([r.emp_id, r.emp_dept].filter(Boolean).join(' · '))}</option>`).join('');
     const last = rows[0] || {};
     const r = rec || { status: 'Draft', company: last.company || '', released_by: last.released_by || '', rcvd_name: last.rcvd_name || '', approved_by: '' };
@@ -461,7 +495,7 @@
     if (r.company && !fv('company').value) { fv('company').insertAdjacentHTML('beforeend', `<option>${E(r.company)}</option>`); fv('company').value = r.company; }
     if (r.turnover_id && !fv('turnover_id').value) { fv('turnover_id').insertAdjacentHTML('beforeend', `<option value="${E(r.turnover_id)}">${E(r.turnover_ctrl_no || r.turnover_id)}</option>`); fv('turnover_id').value = r.turnover_id; }
     fv('ref_view').value = r.ref_no || '';
-    setItems(r.items || []); setPays(r.payments || []);
+    setItems(r.items || []); setPays(r.payments || []); syncBuyerFields();
     if (rec && r.amount != null) { const t = itemsTotal(r.items); amountAuto = !(t > 0 && Math.abs(t - num(r.amount)) > 0.005) && t > 0; fv('amount').value = num(r.amount).toFixed(2); }
     recalc();
     if (rec && !rec.id && rec.turnover_id) bmMsg(`Filled from turnover ${rec.turnover_ctrl_no || ''} — remove any asset not being sold, then set the selling prices.`);
@@ -477,6 +511,12 @@
     const o = collectEdit();
     if (!o.company) { bmMsg('Select the company.', true); fv('company').focus(); return; }
     if (!o.emp_name) { bmMsg('Enter the employee (buyer) name.', true); fv('emp_name').focus(); return; }
+    const bk = buyerKind(o.buyer_type);
+    if (bk !== 'same' && !o.buyer_name) { bmMsg('Enter the buyer\'s full name (or choose "The employee who turned over the asset(s)").', true); fv('buyer_name').focus(); return; }
+    if (bk === 'out' && /deduct/i.test(o.method || '')) { bmMsg('An outside party cannot pay by salary / final-pay deduction — choose another payment method.', true); fv('method').focus(); return; }
+    if (bk === 'same') ['buyer_name','buyer_emp_id','buyer_dept','buyer_pos','buyer_company','buyer_address','buyer_idref','buyer_rel'].forEach(k => { o[k] = ''; });
+    if (bk === 'emp') ['buyer_address','buyer_idref'].forEach(k => { o[k] = ''; });
+    if (bk === 'out') ['buyer_emp_id','buyer_dept','buyer_pos','buyer_company'].forEach(k => { o[k] = ''; });
     if (!o.items.length) { bmMsg('Add at least one IT asset being sold.', true); return; }
     if (o.items.some(it => !it.type)) { bmMsg('Every asset row needs an asset type.', true); return; }
     if (o.status === 'Released' && !num(o.amount)) { bmMsg('Set the agreed buyout price before releasing.', true); fv('amount').focus(); return; }
@@ -506,7 +546,10 @@
       items: turnoverAssets(r, true), amount: amount || null, basis: r.bo_basis || '', method: r.bo_method || '', payments,
       approved_by: r.bo_approved_by || '', released_by: r.sg2_name || '', released_date: fully ? (r.sg2_date || payDate || '') : '',
       rcvd_name: r.bo_rcvd_name || '', rcvd_date: r.bo_rcvd_date || '', buyer_date: r.bo_buyer_date || '', remarks: r.bo_remarks || '',
-      status: fully ? 'Released' : r.bo_approved_by ? 'Approved' : 'For approval'
+      status: fully ? 'Released' : r.bo_approved_by ? 'Approved' : 'For approval',
+      buyer_type: r.bo_buyer_type && (r.bo_buyer || '').trim() ? r.bo_buyer_type : '', buyer_name: r.bo_buyer_type ? (r.bo_buyer || '') : '',
+      buyer_emp_id: r.bo_buyer_emp_id || '', buyer_dept: r.bo_buyer_dept || '', buyer_pos: r.bo_buyer_pos || '', buyer_company: /^Another/.test(r.bo_buyer_type || '') ? coName(r) : '',
+      buyer_contact: r.bo_buyer_contact || '', buyer_address: r.bo_buyer_address || '', buyer_idref: r.bo_buyer_idref || '', buyer_rel: r.bo_buyer_rel || ''
     };
   }
   const im = document.createElement('div'); im.className = 'bm'; im.hidden = true;
@@ -615,9 +658,9 @@
   /* ===================== CSV ===================== */
   function exportCsv(){
     const list = filtered();
-    const head = ['ref_no','company','emp_name','emp_id','emp_dept','emp_pos','occasion','turnover_ctrl_no','status','items','asset_tags','serial_nos','amount','basis','method','installments','amount_paid','balance','pay_status','paid_date','or_nos','approved_by','approved_date','released_by','released_date','rcvd_name','buyer_date','data_wiped','licenses_removed','remarks','created_at','updated_at'];
+    const head = ['ref_no','company','buyer','buyer_type','buyer_emp_id','buyer_dept','buyer_contact','buyer_address','buyer_rel','emp_name','emp_id','emp_dept','emp_pos','occasion','turnover_ctrl_no','status','items','asset_tags','serial_nos','amount','basis','method','installments','amount_paid','balance','pay_status','paid_date','or_nos','approved_by','approved_date','released_by','released_date','rcvd_name','buyer_date','data_wiped','licenses_removed','remarks','created_at','updated_at'];
     const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const lines = list.map(r => { const p = payOf(r), its = r.items || []; const v = { ...r,
+    const lines = list.map(r => { const p = payOf(r), its = r.items || [], b = buyerOf(r); const v = { ...r, buyer: b.name, buyer_type: buyerLabel(b.kind),
       items: its.map(i => `${i.type}${num(i.qty) > 1 ? ' x' + i.qty : ''}${i.desc ? ' (' + i.desc + ')' : ''}${i.price != null ? ' @' + num(i.price).toFixed(2) : ''}`).join('; '),
       asset_tags: its.map(i => i.tag).filter(Boolean).join('; '), serial_nos: its.map(i => i.sn).filter(Boolean).join('; '),
       amount_paid: p.paid.toFixed(2), balance: p.balance.toFixed(2), pay_status: p.status, paid_date: p.status === 'Fully paid' ? p.lastDate || '' : '',
@@ -658,7 +701,7 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
 
   function buildFormDoc(r){
     const co = r.company || '', logo = logoFor(co), ref = r.ref_no || '', gen = fmtLong(today());
-    const p = payOf(r), its = r.items || [];
+    const p = payOf(r), its = r.items || [], b = buyerOf(r);
     const priced = its.some(i => i.price != null && i.price !== '');
     const itemRows = its.map((it, k) => `<tr><td class="c">${k + 1}</td><td>${E(it.type || '')}${num(it.qty) > 1 ? ' ×' + it.qty : ''}</td><td class="m">${E(it.tag || '')}</td><td class="m">${E(it.sn || '')}</td><td>${E(it.desc || '')}${it.acq_date || it.acq_cost ? `<br><span style="color:#555;font-size:9.5px">Acquired ${E(fmtD(it.acq_date))}${it.acq_cost ? ' · cost PHP ' + money(it.acq_cost) : ''}</span>` : ''}</td><td class="c">${E(it.cond || '')}</td><td class="r">${it.price != null && it.price !== '' ? money(num(it.price) * (num(it.qty) || 1)) : ''}</td></tr>`).join('')
       + Array.from({ length: Math.max(0, 3 - its.length) }, () => '<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
@@ -673,17 +716,26 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     <div class="ref">Buyout Ref. No.: <b>${E(ref)}</b>${r.turnover_ctrl_no ? `<br>Turnover Control No.: <b>${E(r.turnover_ctrl_no)}</b>` : ''}<br>Status: ${E(r.status || '')}<br>Date generated: ${E(gen)}</div></div>
   ${stamp}
   <h1>IT ASSET BUYOUT FORM</h1>
-  <div class="tagline">Deed of Sale of Company IT Asset to Employee &middot; Proof of Purchase</div>
+  <div class="tagline">Deed of Sale of Company IT Asset to ${b.kind === 'out' ? 'Buyer' : 'Employee'} &middot; Proof of Purchase</div>
 
-  <h2>1. Buyer (Employee) Information</h2>
+  <h2>1. Buyer Information${b.other ? ' &mdash; ' + (b.kind === 'out' ? 'Outside party (non-employee)' : 'Another employee') : ' (Employee)'}</h2>
   <div class="grid">
-    <div class="f w2"><span class="lbl">Employee name</span><div class="val">${E(r.emp_name || '')}</div></div>
-    <div class="f"><span class="lbl">Employee ID</span><div class="val">${E(r.emp_id || '')}</div></div>
-    <div class="f"><span class="lbl">Department</span><div class="val">${E(r.emp_dept || '')}</div></div>
-    <div class="f"><span class="lbl">Position</span><div class="val">${E(r.emp_pos || '')}</div></div>
-    <div class="f"><span class="lbl">Immediate supervisor</span><div class="val">${E(r.emp_sup || '')}</div></div>
+    <div class="f w2"><span class="lbl">Buyer name</span><div class="val">${E(b.name)}</div></div>
+    ${b.kind === 'out' ? `<div class="f w2"><span class="lbl">Contact no. / e-mail</span><div class="val">${E(b.contact)}</div></div>
+    <div class="f w2"><span class="lbl">Address</span><div class="val">${E(b.address)}</div></div>
+    <div class="f"><span class="lbl">Valid ID presented</span><div class="val">${E(b.idref)}</div></div>
+    <div class="f"><span class="lbl">Relationship</span><div class="val">${E(b.rel)}</div></div>`
+    : `<div class="f"><span class="lbl">Employee ID</span><div class="val">${E(b.id)}</div></div>
+    <div class="f"><span class="lbl">Department</span><div class="val">${E(b.dept)}</div></div>
+    <div class="f"><span class="lbl">Position</span><div class="val">${E(b.pos)}</div></div>
+    ${b.other ? `<div class="f"><span class="lbl">Company</span><div class="val">${E(b.company)}</div></div><div class="f w2"><span class="lbl">Contact / relationship</span><div class="val">${E([b.contact, b.rel].filter(Boolean).join(' · '))}</div></div>` : `<div class="f"><span class="lbl">Immediate supervisor</span><div class="val">${E(r.emp_sup || '')}</div></div>`}`}
     <div class="f w2"><span class="lbl">Occasion of purchase</span><div class="val">${E(r.occasion || '')}</div></div>
   </div>
+  ${b.other ? `<div class="grid" style="margin-top:6px">
+    <div class="f w2"><span class="lbl">Asset(s) turned over by (last custodian)</span><div class="val">${E(r.emp_name || '')}${r.emp_id ? ' &middot; ' + E(r.emp_id) : ''}</div></div>
+    <div class="f"><span class="lbl">Department</span><div class="val">${E(r.emp_dept || '')}</div></div>
+    <div class="f"><span class="lbl">Turnover Control No.</span><div class="val">${E(r.turnover_ctrl_no || '')}</div></div>
+  </div>` : ''}
 
   <h2>2. IT Asset(s) Sold</h2>
   <table><thead><tr><th style="width:26px">#</th><th style="width:120px">Item</th><th style="width:95px">Asset Tag</th><th style="width:110px">Serial No.</th><th>Description / Model</th><th style="width:62px">Condition</th><th style="width:90px">Price (PHP)</th></tr></thead><tbody>${itemRows}</tbody>
@@ -704,25 +756,26 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
 
   <h2>4. Terms and Conditions of Sale</h2>
   <ol>
-    <li><b>${E(co)}</b> (the "Company") sells, transfers and conveys to the employee named above (the "Buyer") the IT asset(s) listed in Section 2 for the total price stated in Section 3.</li>
+    <li><b>${E(co)}</b> (the "Company") sells, transfers and conveys to the ${b.kind === 'out' ? 'person' : 'employee'} named above in Section 1 (the "Buyer") the IT asset(s) listed in Section 2 for the total price stated in Section 3.</li>
     <li>The asset(s) are sold on an <b>"as-is, where-is"</b> basis. The Company gives no warranty as to condition, fitness for purpose, remaining useful life, or manufacturer warranty coverage.</li>
     <li>All company data, files, e-mail/account profiles, and licensed software (including operating system volume licenses and Microsoft 365) have been removed, transferred or deactivated before release. Software licenses are <b>not</b> transferred with the asset unless expressly stated in the remarks.</li>
     <li>Ownership and risk pass to the Buyer upon full payment and release of the asset(s). The asset(s) are thereafter removed from the Company's fixed-asset register and IT asset inventory.</li>
-    <li>Where payment is by salary deduction, installment or deduction from final pay, the Buyer authorizes the Company to deduct the amount(s) stated in Section 3 from the Buyer's compensation in accordance with company policy and applicable law. Any unpaid balance upon separation shall be deducted from the Buyer's final pay.</li>
+    ${b.kind === 'out' ? `<li>As the Buyer is not an employee of the Company, the price stated in Section 3 shall be paid in full (or per the installments stated) before the asset(s) are released; the Company may withhold release until full payment.</li>` : `<li>Where payment is by salary deduction, installment or deduction from final pay, the Buyer authorizes the Company to deduct the amount(s) stated in Section 3 from the Buyer's compensation in accordance with company policy and applicable law. Any unpaid balance upon separation shall be deducted from the Buyer's final pay.</li>`}
     <li>This form, together with the Official/Acknowledgment Receipt(s) listed in Section 3, serves as the Buyer's <b>proof of purchase</b>.</li>
   </ol>
 
   <h2>5. Acknowledgment and Approval</h2>
   <div class="signs">
-    <div class="sg"><div class="line">${E(r.emp_name || '')}</div><div class="role">Buyer (Employee) &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtLong(r.buyer_date))}</span></div></div>
+    <div class="sg"><div class="line">${E(b.name)}</div><div class="role">Buyer${b.kind === 'out' ? ' (Outside party)' : ' (Employee)'} &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtLong(r.buyer_date))}</span></div></div>
     <div class="sg">${sigImg(r.released_by)}<div class="line">${E(r.released_by || '')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtLong(r.released_date))}</span></div></div>
     <div class="sg">${sigImg(r.rcvd_name)}<div class="line">${E(r.rcvd_name || '')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtLong(r.rcvd_date))}</span></div></div>
     <div class="sg">${sigImg(r.approved_by)}<div class="line">${E(r.approved_by || '')}</div><div class="role">Approved by &mdash; Management / Finance</div><div class="dt">Date:<span>${E(fmtLong(r.approved_date))}</span></div></div>
+    ${b.other ? `<div class="sg"><div class="line">${E(r.emp_name || '')}</div><div class="role">Conforme &mdash; Employee who turned over the asset(s) (last custodian)</div><div class="dt">Date:<span></span></div></div>` : ''}
   </div>
 
   <div class="stub">
     <div class="t">Acknowledgment Receipt</div>
-    <p>Received from <u>${B(r.emp_name, 30)}</u> the amount of <u>PHP ${B(p.paid ? money(p.paid) : '', 12)}</u> (<u>${B(amountWords(p.paid), 40)}</u>) as ${p.status === 'Fully paid' ? 'full' : 'partial'} payment for the IT asset(s) listed above under Buyout Ref. No. <u>${E(ref)}</u>.</p>
+    <p>Received from <u>${B(b.name, 30)}</u> the amount of <u>PHP ${B(p.paid ? money(p.paid) : '', 12)}</u> (<u>${B(amountWords(p.paid), 40)}</u>) as ${p.status === 'Fully paid' ? 'full' : 'partial'} payment for the IT asset(s) listed above under Buyout Ref. No. <u>${E(ref)}</u>.</p>
     <p>OR / AR No. <u>${B((r.payments || []).map(x => x.or_no).filter(Boolean).join(', '), 16)}</u> &nbsp; Date <u>${B(fmtLong(p.lastDate), 16)}</u> &nbsp; Received by <u>${B(r.rcvd_name, 30)}</u> (signature over printed name)</p>
   </div>
   <div class="foot"><span>${E(co)} &middot; IT Asset Buyout Form</span><span>${E(ref)} &middot; Generated ${E(gen)}</span></div>
@@ -733,12 +786,12 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     const cos = [...new Set(list.map(r => r.company).filter(Boolean))], co = cos.length === 1 ? cos[0] : 'Meatplus Group', gen = fmtD(today());
     const tot = list.reduce((s, r) => s + num(r.amount), 0), paid = list.reduce((s, r) => s + payOf(r).paid, 0);
     const filterTxt = [filt.status ? 'Status: ' + (filt.status === 'open' ? 'Open' : filt.status) : '', filt.pay ? 'Payment: ' + (filt.pay === 'due' ? 'With balance' : filt.pay) : '', filt.company ? 'Company: ' + filt.company : '', filt.q ? 'Search: "' + filt.q + '"' : ''].filter(Boolean).join(' · ');
-    const body = list.map((r, i) => { const p = payOf(r); return `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</td><td>${E(r.company || '')}</td><td>${E(r.emp_name || '')}<br><span style="color:#444">${E([r.emp_id, r.emp_dept].filter(Boolean).join(' · '))}</span></td><td>${(r.items || []).map(it => `${E(it.type || '')}${it.tag ? ' · ' + E(it.tag) : ''}${it.sn ? ' · ' + E(it.sn) : ''}`).join('<br>')}</td><td>${E(r.method || '')}</td><td class="r">${r.amount != null ? money(r.amount) : ''}</td><td class="r">${money(p.paid)}</td><td class="r">${money(p.balance)}</td><td>${E(p.status)}<br>${E((r.payments || []).map(x => x.or_no).filter(Boolean).join(', '))}</td><td>${E(r.status || '')}${r.released_date ? '<br>' + E(fmtD(r.released_date)) : ''}</td></tr>`; }).join('');
+    const body = list.map((r, i) => { const p = payOf(r); return `<tr><td class="c">${i + 1}</td><td class="m">${E(r.ref_no || '')}${r.turnover_ctrl_no ? '<br>TO: ' + E(r.turnover_ctrl_no) : ''}</td><td>${E(r.company || '')}</td><td>${(() => { const b = buyerOf(r); return `${E(b.name)}${b.other ? ` <i style="color:#444">(${E(b.kind === 'out' ? 'outside party' : 'other employee')})</i>` : ''}<br><span style="color:#444">${E((b.kind === 'out' ? [b.contact] : [b.id, b.dept]).filter(Boolean).join(' · '))}${b.other ? '<br>turned over by ' + E(r.emp_name || '') : ''}</span>`; })()}</td><td>${(r.items || []).map(it => `${E(it.type || '')}${it.tag ? ' · ' + E(it.tag) : ''}${it.sn ? ' · ' + E(it.sn) : ''}`).join('<br>')}</td><td>${E(r.method || '')}</td><td class="r">${r.amount != null ? money(r.amount) : ''}</td><td class="r">${money(p.paid)}</td><td class="r">${money(p.balance)}</td><td>${E(p.status)}<br>${E((r.payments || []).map(x => x.or_no).filter(Boolean).join(', '))}</td><td>${E(r.status || '')}${r.released_date ? '<br>' + E(fmtD(r.released_date)) : ''}</td></tr>`; }).join('');
     return docHead('IT Asset Buyout Register', '@page{size:A4 landscape}') + `<div class="land"><div class="sheet">
   <div class="hdr">${cos.length === 1 && logoFor(co) ? `<img src="${logoFor(co)}" alt="">` : ''}<div><div class="co">${E(co)}</div><div class="sub">Information Technology Department</div></div><div class="ref">Date generated: ${E(gen)}<br>Buyouts: <b>${list.length}</b>${filterTxt ? '<br>' + E(filterTxt) : ''}</div></div>
   <h1>IT ASSET BUYOUT REGISTER</h1>
   <div class="tagline">Company IT assets sold to employees &middot; price, payments and release status</div>
-  <table><thead><tr><th style="width:22px">#</th><th style="width:120px">Ref. No.</th><th>Company</th><th>Employee</th><th>Asset(s) &middot; tag &middot; serial</th><th>Method</th><th style="width:78px">Price</th><th style="width:78px">Paid</th><th style="width:78px">Balance</th><th>Payment / OR</th><th style="width:72px">Status</th></tr></thead>
+  <table><thead><tr><th style="width:22px">#</th><th style="width:120px">Ref. No.</th><th>Company</th><th>Buyer</th><th>Asset(s) &middot; tag &middot; serial</th><th>Method</th><th style="width:78px">Price</th><th style="width:78px">Paid</th><th style="width:78px">Balance</th><th>Payment / OR</th><th style="width:72px">Status</th></tr></thead>
   <tbody>${body || '<tr><td colspan="11" class="c">No buyouts</td></tr>'}</tbody>
   <tfoot><tr><td colspan="6" style="text-align:right">Totals</td><td class="r">${money(tot)}</td><td class="r">${money(paid)}</td><td class="r">${money(Math.max(0, tot - paid))}</td><td colspan="2"></td></tr></tfoot></table>
   <div class="signs">
