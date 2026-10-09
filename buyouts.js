@@ -128,6 +128,11 @@
   .bm .tot b{font-family:var(--mono);color:var(--ink);font-size:13px}
   .bm .scroll{overflow-x:auto}
   .bm .grid label.byr[hidden]{display:none}
+  .bm .grid label{align-content:end}
+  .bm .grid label.chk{display:flex;align-items:center;align-self:center}
+  .bm .sigprev{display:block;min-height:0;line-height:0}
+  .bm .sigprev img{height:46px;max-width:240px;object-fit:contain;object-position:left bottom;margin:2px 0 -6px 4px;position:relative;z-index:1}
+  .bm .sigprev em{display:block;line-height:1.3;font-size:11px;font-style:normal;color:var(--faint);margin-bottom:2px}
   .byo-link{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
   @media(max-width:760px){.bm .grid{grid-template-columns:1fr 1fr}.bm .grid label.w4{grid-column:span 2}}
   @media print{.byo,.bm,.byo-link{display:none!important}}`;
@@ -365,15 +370,15 @@
         <h3>Status &amp; sign-off</h3>
         <div class="grid">
           <label>Status <select name="status">${STATUSES.map(s => `<option>${s}</option>`).join('')}</select></label>
-          <label class="w2">Approved by &mdash; IT Manager <input name="approver_it"></label>
+          <label class="w2">Approved by &mdash; IT Manager <input name="approver_it" list="itatSigNames" placeholder="type or pick a name — signature appears"></label>
           <label>IT Manager approval date <input name="approver_it_date" type="date"></label>
-          <label class="w2">Approved by &mdash; Administrative Manager <input name="approver_admin"></label>
+          <label class="w2">Approved by &mdash; Administrative Manager <input name="approver_admin" list="itatSigNames" placeholder="type or pick a name — signature appears"></label>
           <label>Admin. Manager approval date <input name="approver_admin_date" type="date"></label>
           <span class="hint" style="grid-column:1/-1;margin-top:-4px">Both approvals are required before the buyout can be set to <b>Approved</b> or <b>Released</b>.</span>
-          <label class="w2">Released by (IT Department) <input name="released_by"></label>
+          <label class="w2">Released by (IT Department) <input name="released_by" list="itatSigNames"></label>
           <label>Release date <input name="released_date" type="date"></label>
           <label>Buyer acknowledged on <input name="buyer_date" type="date"></label>
-          <label class="w2">Payment received by (Finance / Cashier) <input name="rcvd_name"></label>
+          <label class="w2">Payment received by (Finance / Cashier) <input name="rcvd_name" list="itatSigNames"></label>
           <label>Received date <input name="rcvd_date" type="date"></label>
         </div>
       </form>
@@ -485,6 +490,18 @@
     [['buyer_emp_id','emp_id'],['buyer_dept','emp_dept'],['buyer_pos','emp_pos']].forEach(([k, src]) => { if (!fv(k).value && r[src]) fv(k).value = r[src]; });
     const co = coName(r); if (co) fv('buyer_company').value = co;
   });
+  // signatory fields: show the saved signature as soon as the name matches the signature library
+  const SIG_FIELDS = ['approver_it','approver_admin','released_by','rcvd_name'];
+  function sigPreview(n){
+    const el = fv(n); if (!el) return;
+    let pv = el.parentElement.querySelector('.sigprev');
+    if (!pv) { pv = document.createElement('span'); pv.className = 'sigprev'; el.before(pv); }
+    const v = el.value.trim(), u = v && typeof window.itatSignatureFor === 'function' ? window.itatSignatureFor(v) : '';
+    const html = u ? `<img src="${u}" alt="Signature of ${E(v)}">` : v ? '<em>No saved signature for this name — add it under Signatures to have it appear here and on the form.</em>' : '';
+    if (pv.dataset.v !== v + '|' + !!u) { pv.innerHTML = html; pv.dataset.v = v + '|' + !!u; }
+  }
+  SIG_FIELDS.forEach(n => { fv(n).addEventListener('input', () => sigPreview(n)); fv(n).addEventListener('change', () => sigPreview(n)); });
+  setInterval(() => { if (!em.hidden) SIG_FIELDS.forEach(sigPreview); }, 800); // picks up signatures added while the window is open
   function openEdit(rec){
     F.reset(); bmMsg(''); amountAuto = true;
     fv('company').innerHTML = '<option value="">— select —</option>' + companies().map(c => `<option>${E(c.name)}</option>`).join('');
@@ -502,7 +519,7 @@
     if (r.company && !fv('company').value) { fv('company').insertAdjacentHTML('beforeend', `<option>${E(r.company)}</option>`); fv('company').value = r.company; }
     if (r.turnover_id && !fv('turnover_id').value) { fv('turnover_id').insertAdjacentHTML('beforeend', `<option value="${E(r.turnover_id)}">${E(r.turnover_ctrl_no || r.turnover_id)}</option>`); fv('turnover_id').value = r.turnover_id; }
     fv('ref_view').value = r.ref_no || '';
-    setItems(r.items || []); setPays(r.payments || []); syncBuyerFields();
+    setItems(r.items || []); setPays(r.payments || []); syncBuyerFields(); SIG_FIELDS.forEach(sigPreview);
     if (rec && r.amount != null) { const t = itemsTotal(r.items); amountAuto = !(t > 0 && Math.abs(t - num(r.amount)) > 0.005) && t > 0; fv('amount').value = num(r.amount).toFixed(2); }
     recalc();
     if (rec && !rec.id && rec.turnover_id) bmMsg(`Filled from turnover ${rec.turnover_ctrl_no || ''} — remove any asset not being sold, then set the selling prices.`);
