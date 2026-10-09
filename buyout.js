@@ -11,6 +11,7 @@
   .bo-grid .f{grid-template-columns:1fr;gap:3px}
   .bo-grid .f.wide{grid-column:span 2}
   .bo-grid .f.w3{grid-column:span 3}
+  .bo-sigf input{width:100%}
   @media(max-width:700px){.bo-grid .f.w3{grid-column:span 2}}
   .bo-grid select{border:0;border-bottom:1px solid var(--line);padding:3px 4px;background:transparent;width:100%}
   .bo-buyer{display:grid;gap:8px;border-bottom:1px dashed var(--line);padding-bottom:12px}
@@ -89,9 +90,9 @@
         <div class="f"><label>Date paid</label><input name="bo_date" type="date"></div>
         <div class="f"><label>Basis of valuation</label><select name="bo_basis"><option value="">— Select —</option><option>Net book value</option><option>Fair market / appraised value</option><option>Fully depreciated (nominal value)</option><option>Company-approved price list</option><option>Other</option></select></div>
         <div class="f w3"><label>Remarks (condition sold, inclusions, accessories, warranty status)</label><input name="bo_remarks"></div>
-        <div class="f"><label>Approved by &mdash; IT Manager</label><input name="bo_appr_it"></div>
+        <div class="f"><label>Approved by &mdash; IT Manager</label><div class="bo-sigf"><input name="bo_appr_it" list="itatSigNames" placeholder="type or pick a name — signature appears"></div></div>
         <div class="f"><label>IT Manager approval date</label><input name="bo_appr_it_date" type="date"></div>
-        <div class="f"><label>Approved by &mdash; Administrative Manager</label><input name="bo_appr_admin"></div>
+        <div class="f"><label>Approved by &mdash; Administrative Manager</label><div class="bo-sigf"><input name="bo_appr_admin" list="itatSigNames" placeholder="type or pick a name — signature appears"></div></div>
         <div class="f"><label>Admin. Manager approval date</label><input name="bo_appr_admin_date" type="date"></div>
       </div>
       <div class="bo-pay">
@@ -110,7 +111,7 @@
         </div>
         <div class="sign">
           <div class="role">Payment received / released by</div><div class="who">Finance / Cashier or authorized company representative</div>
-          <div><input name="bo_rcvd_name"><div class="cap">Signature over printed name</div></div>
+          <div><input name="bo_rcvd_name" list="itatSigNames"><div class="cap">Signature over printed name</div></div>
           <div class="row"><span></span><div><input name="bo_rcvd_date" type="date" style="padding-top:4px"><div class="cap">Date</div></div></div>
         </div>
       </div>
@@ -353,7 +354,7 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     <div class="sg">${sig(o.sg2_name)}<div class="line">${E(o.sg2_name||'')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtDate(o.sg2_date))}</span></div></div>
     <div class="sg">${sig(o.bo_appr_it)}<div class="line">${E(o.bo_appr_it||'')}</div><div class="role">Approved by &mdash; IT Manager</div><div class="dt">Date:<span>${E(fmtDate(o.bo_appr_it_date))}</span></div></div>
     <div class="sg">${sig(o.bo_appr_admin)}<div class="line">${E(o.bo_appr_admin||'')}</div><div class="role">Approved by &mdash; Administrative Manager</div><div class="dt">Date:<span>${E(fmtDate(o.bo_appr_admin_date))}</span></div></div>
-    <div class="sg"><div class="line">${E(o.bo_rcvd_name||'')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtDate(o.bo_rcvd_date))}</span></div></div>
+    <div class="sg">${sig(o.bo_rcvd_name)}<div class="line">${E(o.bo_rcvd_name||'')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtDate(o.bo_rcvd_date))}</span></div></div>
     ${buyer.other ? `<div class="sg"><div class="line">${E(o.emp_name||'')}</div><div class="role">Conforme &mdash; Employee who turned over the asset(s) (last custodian)</div><div class="dt">Date:<span></span></div></div>` : ''}
   </div>
 
