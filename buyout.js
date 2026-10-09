@@ -11,6 +11,13 @@
   .bo-grid .f{grid-template-columns:1fr;gap:3px}
   .bo-grid .f.wide{grid-column:span 2}
   .bo-grid select{border:0;border-bottom:1px solid var(--line);padding:3px 4px;background:transparent;width:100%}
+  .bo-buyer{display:grid;gap:8px;border-bottom:1px dashed var(--line);padding-bottom:12px}
+  .bo-buyer .f{grid-template-columns:1fr;gap:3px}
+  .bo-buyer select{border:0;border-bottom:1px solid var(--line);padding:3px 4px;background:transparent;width:100%;max-width:420px}
+  .bo-bfields{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 16px}
+  .bo-bfields[hidden],.bo-bfields .f[hidden]{display:none}
+  .bo-bfields .f.wide{grid-column:span 2}
+  @media(max-width:700px){.bo-bfields{grid-template-columns:1fr 1fr}}
   .bo-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 16px}
   .bo-items label{display:flex;gap:8px;align-items:center;font-size:12.5px}
   .bo-items input{accent-color:var(--accent);width:14px;height:14px;margin:0}
@@ -55,9 +62,22 @@
   sec.className = 'buyout-sec bo-off';
   sec.innerHTML = `
     <h2>7. Asset Buyout / Proof of Purchase <span class="bo-badge" id="boBadge" hidden></span></h2>
-    <div class="bo-head"><input type="checkbox" id="boEnabled" name="bo_enabled"><label for="boEnabled"><b>The employee is purchasing (buying out) IT asset(s) listed in this turnover</b></label></div>
+    <div class="bo-head"><input type="checkbox" id="boEnabled" name="bo_enabled"><label for="boEnabled"><b>IT asset(s) listed in this turnover are being sold (bought out) — by the employee or another buyer</b></label></div>
     <div class="bo-none" style="display:none;font-size:11px;color:#555">No asset buyout — all items surrendered to the company.</div>
     <div class="bo-body" id="boBody" hidden>
+      <div class="bo-buyer">
+        <div class="f"><label>Buyer</label><select name="bo_buyer_type" id="boBuyerType"><option value="">The employee who turned over the asset(s)</option><option>Another employee</option><option>Outside party (non-employee)</option></select></div>
+        <div class="bo-bfields" id="boBuyerFields" hidden>
+          <div class="f wide"><label>Buyer full name</label><input name="bo_buyer" id="boBuyer" list="boBuyerList"><datalist id="boBuyerList"></datalist></div>
+          <div class="f" data-for="emp"><label>Buyer employee ID</label><input name="bo_buyer_emp_id"></div>
+          <div class="f" data-for="emp"><label>Department</label><input name="bo_buyer_dept"></div>
+          <div class="f" data-for="emp"><label>Position</label><input name="bo_buyer_pos"></div>
+          <div class="f"><label>Contact no. / e-mail</label><input name="bo_buyer_contact"></div>
+          <div class="f wide" data-for="out"><label>Address</label><input name="bo_buyer_address"></div>
+          <div class="f" data-for="out"><label>Valid ID presented (type &amp; no.)</label><input name="bo_buyer_idref"></div>
+          <div class="f"><label>Relationship to the employee / company</label><input name="bo_buyer_rel" placeholder="e.g. spouse, co-worker, outside buyer"></div>
+        </div>
+      </div>
       <div class="hint" style="margin:0">Items purchased (tick the assets being bought out; details are taken from Section 2)</div>
       <div class="bo-items" id="boItems"></div>
       <div class="bo-grid">
@@ -76,10 +96,10 @@
         <div class="f"><label>Date fully paid</label><input name="bo_paid_date" type="date"></div>
       </div>
       <div class="bo-gen noprint"><button type="button" class="btn" id="btnBuyoutForm">Generate Buyout Form</button><span class="hint" style="margin:0">Opens the printable IT Asset Buyout Form (Deed of Sale &amp; Proof of Purchase) filled from this record.</span></div>
-      <div class="bo-terms"><b>Terms of sale.</b> The item(s) ticked above are sold to the employee on an <b>"as-is, where-is"</b> basis, with no warranty from the company. Company data, licenses and accounts have been removed or transferred before release. Upon full payment, ownership passes to the employee and the item(s) are removed from the company's fixed-asset register. This section, together with the official receipt referenced above, serves as the employee's <b>proof of purchase</b>.</div>
+      <div class="bo-terms"><b>Terms of sale.</b> The item(s) ticked above are sold to the buyer (the employee, or the other buyer named above) on an <b>"as-is, where-is"</b> basis, with no warranty from the company. Company data, licenses and accounts have been removed or transferred before release. Upon full payment, ownership passes to the buyer and the item(s) are removed from the company's fixed-asset register. This section, together with the official receipt referenced above, serves as the buyer's <b>proof of purchase</b>.</div>
       <div class="bo-signs">
         <div class="sign">
-          <div class="role">Purchased by (Buyer)</div><div class="who">Employee — signature confirms receipt of the item(s) and acceptance of the terms</div>
+          <div class="role">Purchased by (Buyer)</div><div class="who" id="boBuyerWho">Employee — signature confirms receipt of the item(s) and acceptance of the terms</div>
           <div><input name="bo_buyer_name"><div class="cap">Signature over printed name</div></div>
           <div class="row"><span></span><div><input name="bo_buyer_date" type="date" style="padding-top:4px"><div class="cap">Date</div></div></div>
         </div>
@@ -117,7 +137,32 @@
   // fill()/newForm() set values programmatically without events — observe the checkbox
   const form = document.getElementById('form');
   form.addEventListener('input', () => { if (body.hidden === enabled.checked) sync(); });
-  setInterval(() => { if (body.hidden === enabled.checked) sync(); else refreshTags(); }, 300);
+  setInterval(() => { if (body.hidden === enabled.checked) sync(); else refreshTags(); syncBuyer(); }, 300);
+
+  // ---- Buyer: the employee who turned over the asset(s), another employee, or an outside party ----
+  const bType = document.getElementById('boBuyerType'), bFields = document.getElementById('boBuyerFields'), bName = document.getElementById('boBuyer');
+  let lastBuyerKind = null;
+  function syncBuyer(){
+    const t = bType.value, kind = !t ? 'same' : /^Another/.test(t) ? 'emp' : 'out';
+    if (kind === lastBuyerKind) return; lastBuyerKind = kind;
+    bFields.hidden = kind === 'same';
+    bFields.querySelectorAll('[data-for]').forEach(f => { f.hidden = f.dataset.for !== kind; });
+    const who = document.getElementById('boBuyerWho');
+    if (who) who.textContent = (kind === 'same' ? 'Employee' : kind === 'emp' ? 'Buyer (another employee)' : 'Buyer (outside party)') + ' — signature confirms receipt of the item(s) and acceptance of the terms';
+  }
+  bType.addEventListener('change', () => { syncBuyer(); if (!bType.value) return; bName.focus();
+    const dl = document.getElementById('boBuyerList');
+    if (dl && typeof store !== 'undefined' && store.records) { const names = new Map(); [...store.records.values()].forEach(r => { if (r.emp_name) names.set(r.emp_name, r); }); dl.innerHTML = [...names.values()].map(r => `<option value="${String(r.emp_name).replace(/"/g, '&quot;')}">`).join(''); } });
+  bName.addEventListener('change', () => {
+    const sig = document.querySelector('[name=bo_buyer_name]'), emp = (document.querySelector('[name=emp_name]') || {}).value || '';
+    if (sig && (!sig.value || sig.value === emp || sig.dataset.auto === '1')) { sig.value = bName.value; sig.dataset.auto = '1'; }
+    if (/^Another/.test(bType.value) && typeof store !== 'undefined' && store.records) {
+      const r = [...store.records.values()].reverse().find(x => (x.emp_name || '').trim().toLowerCase() === bName.value.trim().toLowerCase());
+      if (r) [['bo_buyer_emp_id','emp_id'],['bo_buyer_dept','emp_dept'],['bo_buyer_pos','emp_pos']].forEach(([k, src]) => { const el = document.querySelector(`[name=${k}]`); if (el && !el.value && r[src]) el.value = r[src]; });
+    }
+    form.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  syncBuyer();
 
   // ---- Payment status (is the buyout already paid?) ----
   const num = v => { const n = parseFloat(String(v ?? '').replace(/[^0-9.]/g, '')); return isFinite(n) ? n : 0; };
@@ -204,8 +249,14 @@
   const fmtAmt = v => { const n = parseFloat(String(v).replace(/[^0-9.]/g, '')); return isFinite(n) ? n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (v || ''); };
   function reasonText(o){ const m = { r_resign:'Resignation', r_term:'End of contract / Termination', r_transfer:'Transfer', r_reassign:'Reassignment', r_replace:'Replacement / Upgrade' }; const r = Object.keys(m).filter(k => o[k]).map(k => m[k]); if (o.r_other) r.push(o.r_other_txt || 'Other'); return r.join(', '); }
 
+  function buyerOf(o){
+    if (o.bo_buyer_type && (o.bo_buyer || '').trim()) return { other: true, kind: /^Another/.test(o.bo_buyer_type) ? 'emp' : 'out', type: o.bo_buyer_type, name: o.bo_buyer.trim(), id: o.bo_buyer_emp_id || '', dept: o.bo_buyer_dept || '', pos: o.bo_buyer_pos || '', contact: o.bo_buyer_contact || '', address: o.bo_buyer_address || '', idref: o.bo_buyer_idref || '', rel: o.bo_buyer_rel || '' };
+    return { other: false, kind: 'same', name: o.emp_name || '', id: o.emp_id || '', dept: o.emp_dept || '', pos: o.emp_pos || '', contact: o.bo_buyer_contact || '', rel: '' };
+  }
+  window.itatBuyerOf = buyerOf;
   function buildBuyoutDoc(){
     const o = collect();
+    const buyer = buyerOf(o);
     const co = companyName(o), abbr = (document.querySelector('#company option:checked')||{}).dataset?.abbr || '';
     const logo = (typeof LOGOS !== 'undefined' && LOGOS[o.company]) || '';
     const ref = (o.ctrl_no || '').trim() ? o.ctrl_no.trim() + '-BO' : (abbr ? abbr + '-BO-' + new Date().toISOString().slice(0,10).replace(/-/g,'') : '');
@@ -244,18 +295,27 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
     <div class="ref">Buyout Ref. No.: <b>${E(ref)}</b><br>Turnover Control No.: <b>${E(o.ctrl_no||'')}</b><br>Date generated: ${E(today)}</div></div>
   ${pay ? `<div class="stamp ${pay.cls}">${pay.label}${pay.cls === 'paid' && o.bo_paid_date ? '<small>' + E(fmtDate(o.bo_paid_date)) + '</small>' : pay.balance > 0 ? '<small>Balance PHP ' + E(money(pay.balance)) + '</small>' : ''}</div>` : ''}
   <h1>IT ASSET BUYOUT FORM</h1>
-  <div class="tagline">Deed of Sale of Company IT Asset to Employee &middot; Proof of Purchase</div>
+  <div class="tagline">Deed of Sale of Company IT Asset to ${buyer.kind === 'out' ? 'Buyer' : 'Employee'} &middot; Proof of Purchase</div>
 
-  <h2>1. Buyer (Employee) Information</h2>
+  <h2>1. Buyer Information${buyer.other ? ' &mdash; ' + E(buyer.kind === 'emp' ? 'Another employee' : 'Outside party (non-employee)') : ' (Employee)'}</h2>
   <div class="grid">
-    <div class="f w2"><span class="lbl">Employee name</span><div class="val">${E(o.emp_name||'')}</div></div>
-    <div class="f"><span class="lbl">Employee ID</span><div class="val">${E(o.emp_id||'')}</div></div>
-    <div class="f"><span class="lbl">Date of turnover</span><div class="val">${E(fmtDate(o.emp_date))}</div></div>
-    <div class="f"><span class="lbl">Department</span><div class="val">${E(o.emp_dept||'')}</div></div>
-    <div class="f"><span class="lbl">Position</span><div class="val">${E(o.emp_pos||'')}</div></div>
-    <div class="f"><span class="lbl">Immediate supervisor</span><div class="val">${E(o.emp_sup||'')}</div></div>
-    <div class="f"><span class="lbl">Reason for turnover</span><div class="val">${E(reasonText(o))}</div></div>
+    <div class="f w2"><span class="lbl">Buyer name</span><div class="val">${E(buyer.name)}</div></div>
+    ${buyer.kind === 'out' ? `<div class="f w2"><span class="lbl">Contact no. / e-mail</span><div class="val">${E(buyer.contact)}</div></div>
+    <div class="f w2"><span class="lbl">Address</span><div class="val">${E(buyer.address)}</div></div>
+    <div class="f"><span class="lbl">Valid ID presented</span><div class="val">${E(buyer.idref)}</div></div>
+    <div class="f"><span class="lbl">Relationship</span><div class="val">${E(buyer.rel)}</div></div>`
+    : `<div class="f"><span class="lbl">Employee ID</span><div class="val">${E(buyer.id)}</div></div>
+    <div class="f"><span class="lbl">${buyer.other ? 'Contact no.' : 'Date of turnover'}</span><div class="val">${E(buyer.other ? buyer.contact : fmtDate(o.emp_date))}</div></div>
+    <div class="f"><span class="lbl">Department</span><div class="val">${E(buyer.dept)}</div></div>
+    <div class="f"><span class="lbl">Position</span><div class="val">${E(buyer.pos)}</div></div>
+    ${buyer.other ? `<div class="f w2"><span class="lbl">Relationship</span><div class="val">${E(buyer.rel)}</div></div>` : `<div class="f"><span class="lbl">Immediate supervisor</span><div class="val">${E(o.emp_sup||'')}</div></div>
+    <div class="f"><span class="lbl">Reason for turnover</span><div class="val">${E(reasonText(o))}</div></div>`}`}
   </div>
+  ${buyer.other ? `<div class="grid" style="margin-top:6px">
+    <div class="f w2"><span class="lbl">Asset(s) turned over by (last custodian)</span><div class="val">${E(o.emp_name||'')}${o.emp_id ? ' &middot; ' + E(o.emp_id) : ''}</div></div>
+    <div class="f"><span class="lbl">Department</span><div class="val">${E(o.emp_dept||'')}</div></div>
+    <div class="f"><span class="lbl">Date of turnover &middot; reason</span><div class="val">${E([fmtDate(o.emp_date), reasonText(o)].filter(Boolean).join(' · '))}</div></div>
+  </div>` : ''}
 
   <h2>2. IT Asset(s) Sold</h2>
   <table><thead><tr><th style="width:26px">#</th><th style="width:120px">Item</th><th style="width:95px">Asset Tag</th><th style="width:110px">Serial No.</th><th>Description / Model</th><th style="width:64px">Condition</th><th style="width:120px">Remarks</th></tr></thead><tbody>${rows}</tbody></table>
@@ -274,25 +334,26 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
 
   <h2>4. Terms and Conditions of Sale</h2>
   <ol>
-    <li><b>${E(co)}</b> (the "Company") sells, transfers and conveys to the employee named above (the "Buyer") the IT asset(s) listed in Section 2 for the total price stated in Section 3.</li>
+    <li><b>${E(co)}</b> (the "Company") sells, transfers and conveys to the ${buyer.kind === 'out' ? 'person' : 'employee'} named above in Section 1 (the "Buyer") the IT asset(s) listed in Section 2 for the total price stated in Section 3.</li>
     <li>The asset(s) are sold on an <b>"as-is, where-is"</b> basis. The Company gives no warranty as to condition, fitness for purpose, remaining useful life, or manufacturer warranty coverage.</li>
     <li>All company data, files, e-mail/account profiles, and licensed software (including operating system volume licenses and Microsoft 365) have been removed, transferred or deactivated before release. Software licenses are <b>not</b> transferred with the asset unless expressly stated in the remarks.</li>
     <li>Ownership and risk pass to the Buyer upon full payment and release of the asset(s). The asset(s) are thereafter removed from the Company's fixed-asset register and IT asset inventory.</li>
-    <li>Where payment is by salary deduction or deduction from final pay, the Buyer authorizes the Company to deduct the amount stated in Section 3 from the Buyer's compensation in accordance with company policy and applicable law.</li>
+    ${buyer.kind === 'out' ? `<li>As the Buyer is not an employee of the Company, the price stated in Section 3 shall be paid in full before the asset(s) are released.</li>` : `<li>Where payment is by salary deduction or deduction from final pay, the Buyer authorizes the Company to deduct the amount stated in Section 3 from the Buyer's compensation in accordance with company policy and applicable law.</li>`}
     <li>This form, together with the Official/Acknowledgment Receipt referenced in Section 3, serves as the Buyer's <b>proof of purchase</b>.</li>
   </ol>
 
   <h2>5. Acknowledgment and Approval</h2>
   <div class="signs">
-    <div class="sg"><div class="line">${E(o.bo_buyer_name||o.emp_name||'')}</div><div class="role">Buyer (Employee) &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtDate(o.bo_buyer_date))}</span></div></div>
+    <div class="sg"><div class="line">${E(o.bo_buyer_name||buyer.name||'')}</div><div class="role">Buyer${buyer.kind === 'same' ? ' (Employee)' : buyer.kind === 'emp' ? ' (Employee)' : ' (Outside party)'} &mdash; I have read and accept the terms above and acknowledge receipt of the asset(s)</div><div class="dt">Date:<span>${E(fmtDate(o.bo_buyer_date))}</span></div></div>
     <div class="sg">${sig(o.sg2_name)}<div class="line">${E(o.sg2_name||'')}</div><div class="role">Released by &mdash; IT Department</div><div class="dt">Date:<span>${E(fmtDate(o.sg2_date))}</span></div></div>
     <div class="sg"><div class="line">${E(o.bo_rcvd_name||'')}</div><div class="role">Payment received by &mdash; Finance / Cashier</div><div class="dt">Date:<span>${E(fmtDate(o.bo_rcvd_date))}</span></div></div>
     <div class="sg"><div class="line">${E(o.bo_approved_by||'')}</div><div class="role">Approved by &mdash; Management / Finance</div><div class="dt">Date:<span></span></div></div>
+    ${buyer.other ? `<div class="sg"><div class="line">${E(o.emp_name||'')}</div><div class="role">Conforme &mdash; Employee who turned over the asset(s) (last custodian)</div><div class="dt">Date:<span></span></div></div>` : ''}
   </div>
 
   <div class="stub">
     <div class="t">Acknowledgment Receipt</div>
-    <p>Received from <u>${B(o.emp_name,30)}</u> the amount of <u>PHP ${B(amt,12)}</u> (<u>${B(words,40)}</u>) as full payment for the IT asset(s) listed above under Buyout Ref. No. <u>${E(ref)}</u>.</p>
+    <p>Received from <u>${B(buyer.name,30)}</u> the amount of <u>PHP ${B(amt,12)}</u> (<u>${B(words,40)}</u>) as full payment for the IT asset(s) listed above under Buyout Ref. No. <u>${E(ref)}</u>.</p>
     <p>OR / AR No. <u>${B(o.bo_or_no,16)}</u> &nbsp; Date <u>${B(fmtDate(o.bo_date),16)}</u> &nbsp; Received by <u>${B(o.bo_rcvd_name,30)}</u> (signature over printed name)</p>
   </div>
   <div class="foot"><span>${E(co)} &middot; IT Asset Buyout Form</span><span>${E(ref)} &middot; Generated ${E(today)}</span></div>
