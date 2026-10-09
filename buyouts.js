@@ -692,6 +692,46 @@
     if (n) flash(`${n} turnover buyout(s) added to the Buyout register.`);
   }
 
+  /* Section 7 → register: a payment (or approval) recorded on the turnover is reflected in its buyout */
+  let pullBusy = false;
+  async function pullFromTurnovers(){
+    if (pullBusy || !currentUser || !loaded || typeof store === 'undefined' || !store.records) return;
+    const formOpen = document.getElementById('form') && !document.getElementById('form').hidden;
+    pullBusy = true; let n = 0;
+    try {
+      for (const b of rows.filter(x => x.turnover_id && x.status !== 'Cancelled')) {
+        const t = store.records.get(b.turnover_id);
+        if (!t || !t.bo_enabled) continue;
+        if (formOpen && typeof currentId !== 'undefined' && currentId === t._id && typeof dirty !== 'undefined' && dirty) continue; // wait for the turnover's autosave
+        const next = { ...b, payments: (b.payments || []).map(x => ({ ...x })) };
+        let changed = false;
+        const toAmount = num(t.bo_amount);
+        if ((next.amount == null || next.amount === '') && toAmount > 0) { next.amount = toAmount; changed = true; }
+        const price = num(next.amount) || toAmount;
+        const toPaid = t.bo_pay_status === 'Fully paid' ? price : num(t.bo_amount_paid);
+        const reg = payOf(next);
+        if (toPaid > reg.paid + 0.005) {   // more paid on the turnover than in the ledger → add the difference
+          const orKnown = t.bo_or_no && next.payments.some(x => ctrlKey(x.or_no) === ctrlKey(t.bo_or_no));
+          next.payments.push({ date: t.bo_paid_date || t.bo_date || today(), amount: Math.round((toPaid - reg.paid) * 100) / 100, or_no: orKnown ? '' : (t.bo_or_no || ''), method: t.bo_method || next.method || '', remarks: 'From turnover ' + (t.ctrl_no || '') + ' Section 7' });
+          changed = true;
+        } else if (t.bo_or_no && !next.payments.some(x => ctrlKey(x.or_no) === ctrlKey(t.bo_or_no))) {   // OR no. added later on the turnover
+          const blank = [...next.payments].reverse().find(x => !x.or_no && num(x.amount) > 0);
+          if (blank) { blank.or_no = t.bo_or_no; changed = true; }
+        }
+        if (!next.method && t.bo_method) { next.method = t.bo_method; changed = true; }
+        [['approver_it','bo_appr_it'],['approver_it_date','bo_appr_it_date'],['approver_admin','bo_appr_admin'],['approver_admin_date','bo_appr_admin_date']]
+          .forEach(([k, src]) => { if (!next[k] && t[src]) { next[k] = t[src]; changed = true; } });
+        if (changed) { try { await save(next); n++; } catch (e) { console.warn('Buyout sync from turnover', t.ctrl_no, e.message); } }
+      }
+    } finally { pullBusy = false; }
+    if (n) flash(`${n} buyout(s) updated from turnover Section 7 (payment / approval).`);
+  }
+  // check soon after a turnover record is saved, so a payment shows in the register right away
+  if (typeof store !== 'undefined' && store && typeof store.put === 'function') {
+    const prevPut = store.put.bind(store);
+    store.put = async function (rec) { const r = await prevPut(rec); if (rec && rec.bo_enabled) setTimeout(() => { autoImport().then(pullFromTurnovers).catch(() => {}); }, 1200); return r; };
+  }
+
   /* ===================== CSV ===================== */
   function exportCsv(){
     const list = filtered();
@@ -846,8 +886,8 @@ ol{margin:4px 0 0 18px;padding:0;font-size:10.5px;line-height:1.45}ol li{margin-
   /* ===================== session hooks ===================== */
   function subscribe(){ if (channel) return; channel = sb.channel('itat-buyouts').on('postgres_changes', { event: '*', schema: 'public', table: 'itat_buyouts' }, () => load().catch(() => {})).subscribe(); }
   const prevStart = start;
-  start = async function (session) { await prevStart(session); if (!currentUser) return; tab.hidden = false; try { await load(); subscribe(); await autoImport(); } catch (e) { flash('Buyout register: ' + e.message); } };
-  setInterval(() => { autoImport().catch(() => {}); }, 20000); // picks up turnovers whose Section 7 buyout was ticked since
+  start = async function (session) { await prevStart(session); if (!currentUser) return; tab.hidden = false; try { await load(); subscribe(); await autoImport(); await pullFromTurnovers(); } catch (e) { flash('Buyout register: ' + e.message); } };
+  setInterval(() => { autoImport().then(pullFromTurnovers).catch(() => {}); }, 20000); // picks up turnovers whose Section 7 buyout was ticked since
   const prevStop = stop;
   stop = function () { prevStop(); tab.hidden = true; view.hidden = true; em.hidden = true; im.hidden = true; pk.hidden = true; rows = []; loaded = false; if (channel) { sb.removeChannel(channel); channel = null; } };
   if (typeof currentUser !== 'undefined' && currentUser) { tab.hidden = false; load().then(subscribe).then(autoImport).catch(() => {}); }
