@@ -64,7 +64,7 @@
   const buyerLabel = k => k === 'emp' ? 'Another employee' : k === 'out' ? 'Outside party' : 'Employee (turned over)';
   // a turnover counts as already in the register when a buyout is linked to it, or carries its control no. (link lost)
   const ctrlKey = v => String(v || '').trim().toUpperCase();
-  const coveredBy = t => rows.find(b => b.turnover_id === t._id) || (ctrlKey(t.ctrl_no) && rows.find(b => !b.turnover_id && ctrlKey(b.turnover_ctrl_no) === ctrlKey(t.ctrl_no))) || null;
+  const coveredBy = t => rows.find(b => b.turnover_id === t._id) || (ctrlKey(t.ctrl_no) && rows.find(b => ctrlKey(b.turnover_ctrl_no) === ctrlKey(t.ctrl_no))) || null; // same control no. = same turnover, even if linked to a duplicate copy
   const itemsTotal = items => (items || []).reduce((s, it) => s + num(it.price) * (num(it.qty) || 1), 0);
   const sigImg = name => { const u = (name && typeof window.itatSignatureFor === 'function') ? window.itatSignatureFor(name) : ''; return u ? `<img class="sig" src="${u}" alt="">` : ''; };
 

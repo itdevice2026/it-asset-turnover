@@ -445,7 +445,7 @@ const store = {
     this.records=new Map(data.map(r=>[r.id,rowToRec({...r,attachments:(r.attachments||[]).map(a=>({id:a.id,name:a.name,type:a.mime,size:a.size,kind:a.kind,path:a.path,added:a.added_at}))})]));
     if(!this.channel){ this.channel=sb.channel('itat').on('postgres_changes',{event:'*',schema:'public',table:'itat_turnovers'},()=>this.refresh()).subscribe(); }
   },
-  async refresh(){ try{ const cur=currentId; await this.init(); updateCount(); if(!document.getElementById('recordsView').hidden) renderRecords(); if(cur && !this.records.has(cur)){ currentId=null; } }catch(e){} },
+  async refresh(){ try{ const cur=currentId; await this.init(); updateCount(); if(!document.getElementById('recordsView').hidden) renderRecords(); }catch(e){} },
   async put(rec){ const row=recToRow(rec); if(!this.records.has(rec._id)) row.created_by=currentUser?.id||null; const { error } = await sb.from('itat_turnovers').upsert(row); if(error) throw error; this.records.set(rec._id,rec); },
   async del(id){ const { data:files } = await sb.storage.from(BUCKET).list(id); if(files&&files.length) await sb.storage.from(BUCKET).remove(files.map(f=>id+'/'+f.name)); const { error } = await sb.from('itat_turnovers').delete().eq('id',id); if(error) throw error; this.records.delete(id); },
 };
@@ -503,9 +503,16 @@ function buyoutMatch(o,f){ const b=buyoutOf(o); return !f || (f==='any'?!!b : f=
 
 let saveTimer;
 async function saveCurrent(explicit, quiet){
-  const o=collect(); if(quiet && currentId) return;
+  if(!currentUser) return;                                  // signed out: never save (would create a copy)
+  let o=collect(); if(quiet && currentId) return;
   const blank=!o.emp_name && !o.ctrl_no && !companyName(o) && assetsOf(o).length===0 && attachments.length===0;
   if(blank){ if(explicit) flash('Nothing to save yet — fill in at least the employee or company.'); return; }
+  if(!currentId && o.ctrl_no){                              // safety net: never create a second record for the same turnover
+    const key=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const same=[...store.records.values()].find(r=>key(r.ctrl_no)===key(o.ctrl_no));
+    if(same && key(same.emp_name)===key(o.emp_name)){ currentId=same._id; }
+    else if(same && document.getElementById('ctrlNo').dataset.auto){ const c=document.getElementById('ctrlNo'); c.value=''; delete c.dataset.auto; assignControlNo(); o=collect(); }
+  }
   if(!currentId) currentId='r'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const prev=store.records.get(currentId);
   const rec={...o,attachments:attachments.map(a=>({id:a.id,name:a.name,type:a.type,size:a.size,kind:a.kind,path:a.path,added:a.added})),_id:currentId,_created:prev?._created||new Date().toISOString(),_updated:new Date().toISOString()};
@@ -686,9 +693,10 @@ async function start(session){
   state.textContent='Loading records…';
   try{ await store.init(); }catch(e){ state.textContent='Could not load records: '+e.message; return; }
   updateCount();
+  if(currentId && !store.records.has(currentId)){ newForm(); }
   if(store.records.size){ showView('records'); form.hidden=true; state.textContent='Ready'; } else { newForm(); }
 }
-function stop(){ currentUser=null; currentId=null; store.records.clear(); if(store.channel){ sb.removeChannel(store.channel); store.channel=null; } loginEl.hidden=false; document.getElementById('userbox').innerHTML=''; document.getElementById('loginPass').value=''; }
+function stop(){ clearTimeout(saveTimer); currentUser=null; dirty=false; store.records.clear(); if(store.channel){ sb.removeChannel(store.channel); store.channel=null; } loginEl.hidden=false; document.getElementById('userbox').innerHTML=''; document.getElementById('loginPass').value=''; }
 sb.auth.onAuthStateChange((event,session)=>{ if(session && !currentUser) start(session); else if(!session && currentUser) stop(); });
 sb.auth.getSession().then(({data})=>{ if(data.session) start(data.session); else loginEl.hidden=false; });
 </script>
