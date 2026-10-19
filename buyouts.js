@@ -150,8 +150,10 @@
     const { data, error } = await sb.from('itat_buyouts').select('*').order('updated_at', { ascending: false });
     if (error) throw new Error(error.message);
     rows = data || []; loaded = true;
+    try { const d = await sb.from('itat_buyout_dismissed').select('turnover_id'); if (!d.error) dismissed = new Set((d.data || []).map(x => x.turnover_id)); } catch (e) {}
     render(); updateTab();
   }
+  let dismissed = new Set(); // turnovers whose buyout was removed on purpose — auto-import leaves them alone
   function nextRef(company){
     const abbr = abbrOf(company), d = today().replace(/-/g, '');
     let max = 0; const re = new RegExp('^' + abbr + '-BO-\\d{8}-(\\d+)$');
@@ -160,6 +162,9 @@
   }
   async function save(rec){
     const isNew = !rec.id;
+    if (isNew && rec.turnover_id && dismissed.has(rec.turnover_id)) { // added back on purpose (import / picker / Open in register)
+      try { await sb.from('itat_buyout_dismissed').delete().eq('turnover_id', rec.turnover_id); dismissed.delete(rec.turnover_id); } catch (e) {}
+    }
     const row = { ...rec, updated_by: currentUser?.id || null, updated_at: new Date().toISOString() };
     row.items = (row.items || []).filter(it => it.type || it.tag || it.sn || it.desc).map(it => ({ ...it, qty: num(it.qty) || 1, acq_cost: it.acq_cost === '' || it.acq_cost == null ? null : num(it.acq_cost), price: it.price === '' || it.price == null ? null : num(it.price) }));
     row.payments = (row.payments || []).filter(p => num(p.amount) > 0 || p.or_no).map(p => ({ ...p, amount: num(p.amount) }));
@@ -181,6 +186,12 @@
     return data;
   }
   async function remove(id){
+    const b = rows.find(r => r.id === id);
+    if (b && b.turnover_id) { // remember it so auto-import does not re-create it from the turnover's Section 7
+      const { error: de } = await sb.from('itat_buyout_dismissed').upsert({ turnover_id: b.turnover_id, turnover_ctrl_no: b.turnover_ctrl_no || null, ref_no: b.ref_no || null, removed_by: currentUser?.id || null, removed_at: new Date().toISOString() });
+      if (de) throw new Error('Could not remove: ' + de.message);
+      dismissed.add(b.turnover_id);
+    }
     const { error } = await sb.from('itat_buyouts').delete().eq('id', id);
     if (error) throw new Error(error.message);
     rows = rows.filter(r => r.id !== id); render(); updateTab();
@@ -278,7 +289,7 @@
     $('#byoRows').querySelectorAll('[data-form]').forEach(b => b.onclick = () => openDoc(buildFormDoc(rows.find(r => r.id === b.closest('tr').dataset.id))));
     $('#byoRows').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Confirm'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Remove'; }, 4000); return; }
-      try { await remove(b.closest('tr').dataset.id); flash('Buyout removed from the register.'); } catch (e) { alert(e.message); }
+      try { await remove(b.closest('tr').dataset.id); flash('Buyout removed from the register. It will not be re-imported automatically — use "Import from turnovers" to add it back.'); } catch (e) { alert(e.message); }
     });
   }
   $('#byoQ').addEventListener('input', () => { filt.q = $('#byoQ').value; render(); });
@@ -597,7 +608,7 @@
   function openImport(onlyId){
     imList = turnovers().filter(r => r.bo_enabled && !coveredBy(r) && (!onlyId || r._id === onlyId)).sort((a, b) => String(b._updated || '').localeCompare(String(a._updated || '')));
     im.querySelector('#imMsg').textContent = ''; im.querySelector('#imMsg').classList.remove('err');
-    im.querySelector('#imRows').innerHTML = imList.length ? imList.map((r, k) => { const b = fromTurnover(r), p = payOf(b); return `<tr><td><input type="checkbox" data-k="${k}" checked></td><td class="m">${E(r.ctrl_no || '—')}<br><span class="small">${E(fmtD(r.emp_date))}</span></td><td>${E(r.emp_name || '')}<br><span class="small">${E(coName(r))}</span></td><td>${b.items.map(i => E(i.type) + (i.tag ? ` <span class="small">${E(i.tag)}</span>` : '')).join('<br>') || '<span class="small">no items ticked</span>'}</td><td class="m" style="text-align:right">${b.amount ? money(b.amount) : '—'}</td><td><span class="byo-pill ${p.cls}">${p.status}</span></td></tr>`; }).join('')
+    im.querySelector('#imRows').innerHTML = imList.length ? imList.map((r, k) => { const b = fromTurnover(r), p = payOf(b); return `<tr><td><input type="checkbox" data-k="${k}" ${dismissed.has(r._id) ? '' : 'checked'}></td><td class="m">${E(r.ctrl_no || '—')}<br><span class="small">${E(fmtD(r.emp_date))}</span>${dismissed.has(r._id) ? '<br><span class="small" style="color:#b45309">removed earlier</span>' : ''}</td><td>${E(r.emp_name || '')}<br><span class="small">${E(coName(r))}</span></td><td>${b.items.map(i => E(i.type) + (i.tag ? ` <span class="small">${E(i.tag)}</span>` : '')).join('<br>') || '<span class="small">no items ticked</span>'}</td><td class="m" style="text-align:right">${b.amount ? money(b.amount) : '—'}</td><td><span class="byo-pill ${p.cls}">${p.status}</span></td></tr>`; }).join('')
       : `<tr><td colspan="6" class="empty" style="padding:22px;text-align:center;color:var(--muted)">No turnover buyouts waiting to be imported — every Section 7 buyout is already in the register.</td></tr>`;
     im.querySelector('#imAll').checked = imList.length > 0;
     im.hidden = false;
@@ -684,7 +695,7 @@
     }
     const formOpen = document.getElementById('form') && !document.getElementById('form').hidden;
     const editing = formOpen && typeof currentId !== 'undefined' ? currentId : null; // wait until the user leaves the record
-    const todo = turnovers().filter(r => r.bo_enabled && !coveredBy(r) && r._id !== editing);
+    const todo = turnovers().filter(r => r.bo_enabled && !coveredBy(r) && !dismissed.has(r._id) && r._id !== editing);
     if (!todo.length) return;
     autoBusy = true; let n = 0;
     try { for (const r of todo) { const b = fromTurnover(r); if (rows.some(x => x.ref_no === b.ref_no)) b.ref_no = ''; try { await save(b); n++; } catch (e) { if (!/already linked/.test(e.message)) console.warn('Buyout auto-import', r.ctrl_no, e.message); } } }
