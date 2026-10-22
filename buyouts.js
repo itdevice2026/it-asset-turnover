@@ -200,19 +200,19 @@
   async function syncTurnover(b){
     if (!b.turnover_id || typeof store === 'undefined' || !store.records) return;
     const p = payOf(b);
-    const vals = { bo_appr_it: b.approver_it || '', bo_appr_it_date: b.approver_it_date || '', bo_appr_admin: b.approver_admin || '', bo_appr_admin_date: b.approver_admin_date || '', bo_pay_status: p.status, bo_amount_paid: p.paid ? p.paid.toFixed(2) : '', bo_paid_date: p.status === 'Fully paid' ? (p.lastDate || '') : '', bo_amount: b.amount != null ? Number(b.amount).toFixed(2) : '', bo_or_no: p.lastOr || '', bo_date: p.lastDate || '' };
+    const vals = { bo_appr_it: b.approver_it || '', bo_appr_it_date: b.approver_it_date || '', bo_appr_admin: b.approver_admin || '', bo_appr_admin_date: b.approver_admin_date || '', bo_pay_status: p.status, bo_amount_paid: p.paid ? p.paid.toFixed(2) : '', bo_paid_date: p.status === 'Fully paid' ? (p.lastDate || '') : '', bo_amount: b.amount != null ? Number(b.amount).toFixed(2) : '', bo_or_no: p.lastOr || '', bo_date: p.lastDate || '', bo_remarks: b.remarks || '' };
     if (typeof currentId !== 'undefined' && currentId === b.turnover_id && typeof form !== 'undefined') {
       // the record is open in the form: write into the fields and let autosave persist them
       const f = document.getElementById('form'); if (!f || !f.querySelector('[name=bo_enabled]')?.checked) return;
       let changed = false;
-      for (const [k, v] of Object.entries(vals)) { const el = f.querySelector(`[name="${k}"]`); if (el && el.value !== v && !(/^bo_(or_no|date|appr_)/.test(k) && !v)) { el.value = v; changed = true; } }
+      for (const [k, v] of Object.entries(vals)) { const el = f.querySelector(`[name="${k}"]`); if (el && el.value !== v && !(/^bo_(or_no|date|appr_|remarks)/.test(k) && !v)) { el.value = v; changed = true; } }
       if (changed) f.querySelector('[name=bo_amount_paid]')?.dispatchEvent(new Event('input', { bubbles: true }));
       return;
     }
     const rec = store.records.get(b.turnover_id); if (!rec || !rec.bo_enabled) return;
     const next = { ...rec };
     let changed = false;
-    for (const [k, v] of Object.entries(vals)) { if (/^bo_(or_no|date|appr_)/.test(k) && !v) continue; if ((rec[k] || '') !== v) { next[k] = v; changed = true; } }
+    for (const [k, v] of Object.entries(vals)) { if (/^bo_(or_no|date|appr_|remarks)/.test(k) && !v) continue; if ((rec[k] || '') !== v) { next[k] = v; changed = true; } }
     if (!changed) return;
     next._updated = new Date().toISOString();
     await store.put(next);
@@ -730,12 +730,17 @@
           if (blank) { blank.or_no = t.bo_or_no; changed = true; }
         }
         if (!next.method && t.bo_method) { next.method = t.bo_method; changed = true; }
+        { // Section 7 Remarks → register (fills a blank, or takes the turnover's text when it was edited after the buyout)
+          const tRem = String(t.bo_remarks || '').trim(), bRem = String(next.remarks || '').trim();
+          const tTime = Date.parse(t._updated || '') || 0, bTime = Date.parse(next.updated_at || '') || 0;
+          if (tRem && tRem !== bRem && (!bRem || tTime > bTime)) { next.remarks = tRem; changed = true; }
+        }
         [['approver_it','bo_appr_it'],['approver_it_date','bo_appr_it_date'],['approver_admin','bo_appr_admin'],['approver_admin_date','bo_appr_admin_date']]
           .forEach(([k, src]) => { if (!next[k] && t[src]) { next[k] = t[src]; changed = true; } });
         if (changed) { try { await save(next); n++; } catch (e) { console.warn('Buyout sync from turnover', t.ctrl_no, e.message); } }
       }
     } finally { pullBusy = false; }
-    if (n) flash(`${n} buyout(s) updated from turnover Section 7 (payment / approval).`);
+    if (n) flash(`${n} buyout(s) updated from turnover Section 7 (payment / approval / remarks).`);
   }
   // check soon after a turnover record is saved, so a payment shows in the register right away
   if (typeof store !== 'undefined' && store && typeof store.put === 'function') {
